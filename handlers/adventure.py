@@ -510,6 +510,10 @@ async def adventure_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         player = get_player(user.id)
         required_level = loc.get("required_level", 1)
         
+        # Проверяем активную экспедицию ПЕРВЫМ делом
+        active_exp = player.get("active_expedition")
+        has_active_expedition = active_exp is not None
+        
         # Level check
         if player.get("lvl", 1) < required_level:
             await query.edit_message_text(
@@ -517,6 +521,30 @@ async def adventure_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 parse_mode='HTML',
             )
             return
+
+        # Получаем информацию об активной экспедиции если есть
+        expedition_info = None
+        if has_active_expedition and isinstance(active_exp, dict):
+            start_time = active_exp.get("start_time")
+            end_time = active_exp.get("end_time")
+            exp_loc_name = active_exp.get("location_name", "Неизвестно")
+            
+            if start_time and end_time:
+                from datetime import datetime, timezone
+                start_dt = datetime.fromisoformat(start_time.replace("Z", "+00:00")) if "Z" in start_time else datetime.fromisoformat(start_time)
+                end_dt = datetime.fromisoformat(end_time.replace("Z", "+00:00")) if "Z" in end_time else datetime.fromisoformat(end_time)
+                now = datetime.now(timezone.utc)
+                
+                total_duration = (end_dt - start_dt).total_seconds()
+                elapsed = (now - start_dt).total_seconds()
+                remaining = max(0, total_duration - elapsed)
+                remaining_minutes = int(remaining / 60)
+                
+                expedition_info = {
+                    "location": exp_loc_name,
+                    "remaining_minutes": remaining_minutes,
+                    "remaining_seconds": int(remaining)
+                }
 
         # Get boss chance and name from first boss in bosses list
         boss_chance = "0"
@@ -553,9 +581,14 @@ async def adventure_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             boss_name=boss_name,
             boss_chance=boss_chance,
         )
+        
+        # Добавляем информацию об активной экспедиции если есть
+        if has_active_expedition and expedition_info:
+            loc_text += f"\n\n⏳ <b>Гном в экспедиции:</b>\n📍 {expedition_info['location']}\n⏱️ Осталось: {expedition_info['remaining_minutes']} мин. {expedition_info['remaining_seconds']} сек."
+        
         await query.edit_message_text(
             loc_text,
-            reply_markup=_location_details_keyboard(loc_id),
+            reply_markup=_location_details_keyboard(loc_id, has_active_expedition=has_active_expedition),
             parse_mode='HTML',
         )
         return
@@ -565,15 +598,22 @@ async def adventure_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     # ------------------------------------------------------------------
     if data.startswith("adv_cancel_expedition_"):
         loc_id = data[len("adv_cancel_expedition_") :]
+        logger.info(f"Cancel expedition callback: loc_id={loc_id}, user_id={user.id}")
+        
         locations = load_locations()
         loc = locations.get(loc_id)
         if not loc:
+            logger.error(f"Unknown location: {loc_id}")
+            await query.edit_message_text("❌ Неизвестная локация!", parse_mode='HTML')
             return
 
         player = get_player(user.id)
         expedition = player.get("active_expedition")
         
+        logger.info(f"Player active_expedition: {expedition}")
+        
         if not expedition:
+            logger.warning(f"User {user.id} tried to cancel but has no active expedition")
             await query.edit_message_text(
                 "🚫 У вас нет активной экспедиции!",
                 parse_mode='HTML'
@@ -590,16 +630,49 @@ async def adventure_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         remaining = total_duration - elapsed
         remaining_minutes = max(1, int(remaining / 60))
         
-        # Return player from expedition (no rewards, just return)
+        # Force clear active_expedition
         update_player(user.id, active_expedition=None)
+        logger.info(f"Expedition cancelled for user {user.id}. Remaining time: {remaining_minutes} min")
+        
+        # Get boss and reward info for display
+        boss_chance = "0"
+        boss_name = "Нет данных"
+        bosses = loc.get("bosses", [])
+        if bosses:
+            first_boss = bosses[0]
+            boss_name = first_boss.get("display_name", first_boss.get("name", "Нет данных"))
+            boss_chance = str(int(first_boss.get("encounter_chance", 0) * 100))
+        
+        # Format rewards from resources
+        rewards_text = _get_text("adventure.resources_loot")
+        resources = loc.get("resources", [])
+        if resources:
+            rewards_items = []
+            for item in resources:
+                item_name = item.get("name", item.get("id", "Resource"))
+                chance = int(item.get("chance", 0) * 100)
+                rewards_items.append(f"{item_name} ({chance}%)")
+            if rewards_items:
+                rewards_text = "• " + "\n• ".join(rewards_items)
+        
+        # Show location menu again with expedition cleared
+        loc_text = _get_text(
+            "adventure.location_detailed_info",
+            username=user.username or user.first_name,
+            location_emoji=loc.get("display_name", "")[:2] if loc.get("display_name") else "🌲",
+            location_name=loc.get("name", loc_id),
+            location_description=loc.get("full_description", ""),
+            min_level=loc.get("requirements", {}).get("min_level", 1),
+            duration=loc.get("duration_minutes", 5),
+            rewards=rewards_text,
+            boss_name=boss_name,
+            boss_chance=boss_chance,
+        )
+        loc_text += f"\n\n✅ <b>Гном возвращён из экспедиции!</b>\nОсталось времени: {remaining_minutes} мин."
         
         await query.edit_message_text(
-            _get_text(
-                "adventure.expedition_cancelled_early",
-                username=user.username or user.first_name,
-                location_name=loc.get("name", loc_id),
-                remaining=remaining_minutes
-            ),
+            loc_text,
+            reply_markup=_location_details_keyboard(loc_id, has_active_expedition=False),
             parse_mode='HTML'
         )
         return
@@ -609,17 +682,25 @@ async def adventure_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     # ------------------------------------------------------------------
     if data.startswith("adv_expedition_"):
         loc_id = data[len("adv_expedition_") :]
+        logger.info(f"Start expedition callback: loc_id={loc_id}, user_id={user.id}")
+        
         locations = load_locations()
         loc = locations.get(loc_id)
         if not loc:
+            logger.error(f"Unknown location: {loc_id}")
             return
 
         player = get_player(user.id)
+        logger.info(f"Player data before expedition: {player}")
         
         # Check if already on expedition
         if player.get("active_expedition"):
+            logger.warning(f"User {user.id} tried to start expedition but already has active_expedition: {player.get('active_expedition')}")
+            # Show detailed info about current expedition
+            current_exp = player.get("active_expedition", {})
+            exp_loc_name = current_exp.get("location_name", "Неизвестно")
             await query.edit_message_text(
-                "⏳ Вы уже в экспедиции! Дождитесь окончания.",
+                f"⏳ Вы уже в экспедиции!\n📍 Локация: {exp_loc_name}\n\nИспользуйте кнопку 'Вернуть из экспедиции' чтобы досрочно вернуться.",
                 parse_mode='HTML'
             )
             return
