@@ -509,6 +509,22 @@ async def adventure_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         
         # Проверяем активную экспедицию ПЕРВЫМ делом
         active_exp = player.get("active_expedition")
+        has_active_expedition = False
+        
+        # Проверяем если экспедиция истекла по времени - сбрасываем
+        if active_exp is not None and isinstance(active_exp, dict):
+            end_time = active_exp.get("end_time")
+            if end_time:
+                try:
+                    end_dt = datetime.fromisoformat(end_time.replace("Z", "+00:00")) if "Z" in end_time else datetime.fromisoformat(end_time)
+                    now = datetime.now(timezone.utc)
+                    if now >= end_dt:
+                        # Экспедиция истекла - сбрасываем
+                        update_player(user.id, active_expedition=None)
+                        active_exp = None
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"Error parsing expedition end_time: {e}")
+        
         has_active_expedition = active_exp is not None
         
         # Level check
@@ -527,7 +543,6 @@ async def adventure_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             exp_loc_name = active_exp.get("location_name", "Неизвестно")
             
             if start_time and end_time:
-                from datetime import datetime, timezone
                 start_dt = datetime.fromisoformat(start_time.replace("Z", "+00:00")) if "Z" in start_time else datetime.fromisoformat(start_time)
                 end_dt = datetime.fromisoformat(end_time.replace("Z", "+00:00")) if "Z" in end_time else datetime.fromisoformat(end_time)
                 now = datetime.now(timezone.utc)
@@ -618,12 +633,14 @@ async def adventure_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             return
 
         # Calculate elapsed time and refund
-        start_time = datetime.fromisoformat(expedition.get("start_time"))
-        end_time = datetime.fromisoformat(expedition.get("end_time"))
+        expedition_start = expedition.get("start_time")
+        expedition_end = expedition.get("end_time")
+        start_dt = datetime.fromisoformat(expedition_start.replace("Z", "+00:00")) if "Z" in expedition_start else datetime.fromisoformat(expedition_start)
+        end_dt = datetime.fromisoformat(expedition_end.replace("Z", "+00:00")) if "Z" in expedition_end else datetime.fromisoformat(expedition_end)
         now = datetime.now(timezone.utc)
         
-        total_duration = (end_time - start_time).total_seconds()
-        elapsed = (now - start_time).total_seconds()
+        total_duration = (end_dt - start_dt).total_seconds()
+        elapsed = (now - start_dt).total_seconds()
         remaining = total_duration - elapsed
         remaining_minutes = max(1, int(remaining / 60))
         
