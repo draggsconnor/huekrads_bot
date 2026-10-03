@@ -451,9 +451,6 @@ def _location_details_keyboard(loc_id: str, has_active_expedition: bool = False)
     return InlineKeyboardMarkup(buttons)
 
 
-async def adventure_callback
-
-
 # ---------------------------------------------------------------------------
 # Main handlers
 # ---------------------------------------------------------------------------
