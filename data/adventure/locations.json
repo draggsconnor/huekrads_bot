@@ -12,8 +12,8 @@
     "requirements": {
       "min_level": 1
     },
-    "expedition_duration_seconds": 300,
-    "encounter_chance": 0.50,
+    "expedition_duration_seconds": 10,
+    "encounter_chance": 1.0,
     "available_actions": ["explore", "rest", "hunt"],
     "bosses": [
       {
@@ -102,8 +102,8 @@
     "requirements": {
       "min_level": 2
     },
-    "expedition_duration_seconds": 420,
-    "encounter_chance": 0.50,
+    "expedition_duration_seconds": 10,
+    "encounter_chance": 1.0,
     "available_actions": ["dig", "explore", "rest"],
     "bosses": [
       {

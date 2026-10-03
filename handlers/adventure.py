@@ -20,6 +20,8 @@ from telegram.ext import CallbackQueryHandler, ContextTypes, ConversationHandler
 
 from text_resources import get_text
 
+# Export for bot.py import
+
 # States for interactive encounter fight
 WAITING_FOR_PLAYER_ACTION = 1
 
@@ -1112,3 +1114,46 @@ def register_adventure_handlers(application) -> None:
         fallbacks=[CallbackQueryHandler(_show_fight_details_callback, pattern=r"^adventure_fight_details_")],
     )
     application.add_handler(encounter_fight_handler)
+
+
+async def adventure_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Main adventure command handler - shows location selection."""
+    query = update.callback_query if update.callback_query else None
+    chat_id = update.effective_chat.id if update.effective_chat else None
+    
+    if query:
+        await query.answer()
+    
+    locations = load_locations()
+    text = _get_text("adventure.select_location")
+    
+    keyboard = []
+    for loc_id, loc in locations.items():
+        if loc.get("enabled", True):
+            loc_name = loc.get("name", loc_id)
+            duration = loc.get("duration_minutes", 60)
+            keyboard.append([InlineKeyboardButton(
+                f"{loc_name} ({duration} мин)",
+                callback_data=f"adventure_start_{loc_id}"
+            )])
+    
+    keyboard.append([InlineKeyboardButton(_get_text("adventure.back"), callback_data="main_menu")])
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    if query:
+        await query.edit_message_text(
+            text=text,
+            reply_markup=reply_markup,
+            parse_mode="HTML"
+        )
+    elif chat_id:
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=text,
+            reply_markup=reply_markup,
+            parse_mode="HTML"
+        )
+
+
+# Export for bot.py import
+adventure_command = adventure_handler

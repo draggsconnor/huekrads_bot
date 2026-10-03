@@ -332,3 +332,24 @@ expedition_cancelled: |
   
   {username} досрочно вернулся из экспедиции.
   {result_message}
+
+# Encounter fight messages
+encounter_victory: |
+  🎉 <b>ПОБЕДА!</b>
+  Вы одолели {mob_name}!
+  
+encounter_defeat: |
+  💀 <b>ПОРАЖЕНИЕ...</b>
+  {mob_name} оказался сильнее.
+
+encounter_mob_escaped: |
+  🏃 <b>НИЧЬЯ!</b>
+  {mob_name} скрылся в чаще.
+
+fight_details_button: "📋 Детали боя"
+fight_round_header: "  Ход {round}: {action}"
+fight_player_hp: "  Ваш HP: {player_hp}, HP врага: {mob_hp}"
+fight_action_attack: "⚔️ Атака ({damage} урона)"
+fight_action_block: "🛡️ Блок"
+fight_player_stunned: " ⚡Ошеломлен!"
+fight_mob_crit: " (💥 КРИТ!)"
