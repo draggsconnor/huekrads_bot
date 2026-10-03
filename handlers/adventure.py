@@ -754,8 +754,9 @@ async def adventure_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             location_name=loc.get("name", loc_id),
             duration=duration_minutes
         )
-        await update.effective_message.reply_text(
-            expedition_text,
+        await context.bot.send_message(
+            chat_id=user.id,
+            text=expedition_text,
             parse_mode='HTML'
         )
         
