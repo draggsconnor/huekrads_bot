@@ -276,69 +276,156 @@ def _format_loot(loot: list[dict[str, Any]], pool: dict[str, Any]) -> str:
 # Expedition helpers
 # ---------------------------------------------------------------------------
 
-def _select_encounter_mob(loc_id: str, mobs_data: dict[str, Any], locations: dict[str, Any] | None = None) -> tuple[dict[str, Any], str | None]:
-    """Select a random mob based on encounter_chance for the location.
+def _select_encounter_mob(loc_id: str, mobs_data: dict[str, Any], locations: dict[str, Any] | None = None, force_encounter: bool = True) -> tuple[dict[str, Any], str | None]:
+    """Select a random mob for encounter at the location.
+    
+    Args:
+        loc_id: Location identifier
+        mobs_data: Mobs data from mobs.json
+        locations: Locations data from locations.json
+        force_encounter: If True, always return a mob (100% encounter chance)
     
     Returns tuple of (mob_data, mob_description) where:
     - mob_data: dict with mob stats for combat
     - mob_description: formatted description text from adventure.yaml
     """
-    mob_name_text_key = None
     mob_desc_text_key = None
     
-    if locations:
-        loc = locations.get(loc_id, {})
-        # Get specific_mobs as list of mob IDs from location
-        specific_mob_ids = loc.get("specific_mobs", [])
+    # First, try to get specific mobs from mobs.json for this location
+    specific_mobs_by_loc = mobs_data.get("specific_mobs", {})
+    loc_specific_mobs = specific_mobs_by_loc.get(loc_id, [])
+    
+    if loc_specific_mobs:
+        # Build weighted pool from specific mobs in mobs.json
+        weighted_pool = []
+        for mob_def in loc_specific_mobs:
+            mob_id = mob_def.get("id")
+            if mob_id:
+                encounter_chance = mob_def.get("encounter_chance", 1.0)
+                weighted_pool.append((mob_id, mob_def, encounter_chance))
         
-        if specific_mob_ids:
-            # Build weighted pool from specific mob IDs
-            weighted_pool = []
-            for mob_id in specific_mob_ids:
-                mob_def = mobs_data.get("mobs", {}).get(mob_id, {})
-                if mob_def:
-                    encounter_chance = mob_def.get("encounter_chance", 1)
-                    weighted_pool.append((mob_id, mob_def, encounter_chance))
+        if weighted_pool:
+            # Select mob based on weights
+            # If force_encounter is True, we always select a mob (100% encounter)
+            # Otherwise, check if random chance passes the total weight threshold
+            total_weight = sum(w[2] for w in weighted_pool)
             
-            if weighted_pool:
-                # Select mob based on weights - always encounter (100% chance)
-                total_weight = sum(w[2] for w in weighted_pool)
-                rand = random.random() * total_weight
-                cumulative = 0
+            if force_encounter:
+                # Normalize weights so total = 1.0 for 100% encounter
+                rand = random.random()  # 0.0 to 1.0
+                cumulative = 0.0
                 for mob_id, mob_def, weight in weighted_pool:
-                    # Use 1.0 for 100% encounter chance
-                    cumulative += 1.0
-                    if rand <= total_weight:  # Always select a mob
-                        # Return mob with its name and desc text keys
-                        mob_name_text_key = f"{mob_id}_name"
+                    normalized_weight = weight / total_weight if total_weight > 0 else 1.0 / len(weighted_pool)
+                    cumulative += normalized_weight
+                    if rand <= cumulative:
+                        # Return this mob
                         mob_desc_text_key = f"{mob_id}_desc"
-                        
                         mob_tactics = mob_def.get("tactics", {})
-                        # Return mob with 100% encounter chance
+                        
                         return (
                             {
                                 "id": mob_id,
-                                "name": mob_def.get("display_name", mob_id),
+                                "name": mob_def.get("display_name", mob_def.get("name", mob_id)),
                                 "hp": mob_def.get("hp", 30),
                                 "max_hp": mob_def.get("hp", 30),
                                 "attack": mob_def.get("attack", 5),
                                 "defense": mob_def.get("defense", 1),
                                 "speed": mob_def.get("speed", 3),
                                 "crit_chance": mob_def.get("crit_chance", 0.0),
-                                "dmg": mob_def.get("attack", 5),  # dmg from attack
-                                "level": mob_def.get("min_level", 1),
+                                "dmg": mob_def.get("attack", 5),
+                                "level": mob_def.get("level", 1),
                                 "tactics": mob_tactics,
                                 "special_ability": mob_def.get("special_ability"),
                                 "debuff_chance": mob_tactics.get("debuff_chance", 0),
                                 "overpower": mob_tactics.get("overpower", False),
-                                "has_suck_ability": mob_id == "head_on_spider_legs",  # special for head mob
-                                "turns_to_kill": mob_def.get("turns_to_kill", 3),  # for head_on_spider_legs
-                                "encounter_chance": 1.0,  # 100% encounter chance
+                                "has_suck_ability": mob_id == "head_on_spider_legs",
+                                "turns_to_kill": mob_def.get("turns_to_kill", 3),
+                                "encounter_chance": 1.0,
                             },
                             mob_desc_text_key
                         )
+            else:
+                # Non-force mode - check encounter chance
+                rand = random.random()
+                if rand < total_weight:
+                    # Select a mob based on weights
+                    rand = random.random() * total_weight
+                    cumulative = 0.0
+                    for mob_id, mob_def, weight in weighted_pool:
+                        cumulative += weight
+                        if rand <= cumulative:
+                            mob_desc_text_key = f"{mob_id}_desc"
+                            mob_tactics = mob_def.get("tactics", {})
+                            
+                            return (
+                                {
+                                    "id": mob_id,
+                                    "name": mob_def.get("display_name", mob_def.get("name", mob_id)),
+                                    "hp": mob_def.get("hp", 30),
+                                    "max_hp": mob_def.get("hp", 30),
+                                    "attack": mob_def.get("attack", 5),
+                                    "defense": mob_def.get("defense", 1),
+                                    "speed": mob_def.get("speed", 3),
+                                    "crit_chance": mob_def.get("crit_chance", 0.0),
+                                    "dmg": mob_def.get("attack", 5),
+                                    "level": mob_def.get("level", 1),
+                                    "tactics": mob_tactics,
+                                    "special_ability": mob_def.get("special_ability"),
+                                    "debuff_chance": mob_tactics.get("debuff_chance", 0),
+                                    "overpower": mob_tactics.get("overpower", False),
+                                    "has_suck_ability": mob_id == "head_on_spider_legs",
+                                    "turns_to_kill": mob_def.get("turns_to_kill", 3),
+                                    "encounter_chance": 1.0,
+                                },
+                                mob_desc_text_key
+                            )
     
-    # Fallback to generic mob generation if no specific mobs
+    # Fallback: try locations.json specific_mobs (list of mob IDs)
+    if locations:
+        loc = locations.get(loc_id, {})
+        specific_mob_ids = loc.get("specific_mobs", [])
+        
+        if specific_mob_ids:
+            # Build pool from mob IDs - need to find mob definitions
+            # Check if mob IDs exist in mobs.json specific_mobs
+            valid_mobs = []
+            for mob_id in specific_mob_ids:
+                # Look for mob in mobs.json specific_mobs
+                for mob_def in loc_specific_mobs:
+                    if mob_def.get("id") == mob_id:
+                        valid_mobs.append((mob_id, mob_def, mob_def.get("encounter_chance", 1.0)))
+                        break
+            
+            if valid_mobs:
+                # Select randomly from valid mobs (100% encounter)
+                mob_id, mob_def, _ = random.choice(valid_mobs)
+                mob_desc_text_key = f"{mob_id}_desc"
+                mob_tactics = mob_def.get("tactics", {})
+                
+                return (
+                    {
+                        "id": mob_id,
+                        "name": mob_def.get("display_name", mob_def.get("name", mob_id)),
+                        "hp": mob_def.get("hp", 30),
+                        "max_hp": mob_def.get("hp", 30),
+                        "attack": mob_def.get("attack", 5),
+                        "defense": mob_def.get("defense", 1),
+                        "speed": mob_def.get("speed", 3),
+                        "crit_chance": mob_def.get("crit_chance", 0.0),
+                        "dmg": mob_def.get("attack", 5),
+                        "level": mob_def.get("level", 1),
+                        "tactics": mob_tactics,
+                        "special_ability": mob_def.get("special_ability"),
+                        "debuff_chance": mob_tactics.get("debuff_chance", 0),
+                        "overpower": mob_tactics.get("overpower", False),
+                        "has_suck_ability": mob_id == "head_on_spider_legs",
+                        "turns_to_kill": mob_def.get("turns_to_kill", 3),
+                        "encounter_chance": 1.0,
+                    },
+                    mob_desc_text_key
+                )
+    
+    # Fallback to generic mob generation if no specific mobs found
     mob_types = mobs_data.get("mob_types", {})
     encounter_weights = mobs_data.get("encounter_weights", {})
     
@@ -399,73 +486,27 @@ def _get_text(key: str, **kwargs) -> str:
         return key
 
 
-# ---------------------------------------------------------------------------
-# Callback handlers
-# ---------------------------------------------------------------------------
-
-async def send_expedition_result(user_id: int, loc_id: str, username: str, context: ContextTypes.DEFAULT_TYPE, chat_id: int = None) -> None:
-    """Send expedition result to player with encounter fight if applicable.
+async def _start_interactive_expedition_encounter(
+    user_id: int,
+    mob_def: dict,
+    username: str,
+    context: ContextTypes.DEFAULT_TYPE,
+    chat_id: int = None,
+    loc_id: str = None
+) -> None:
+    """Start an interactive encounter fight after expedition completes.
     
-    After expedition, if the location has specific_mobs configured, always trigger
-    an encounter fight (100% chance). Otherwise sends regular result.
+    This function ALWAYS starts an encounter fight (100% chance) when called.
     """
-    # Get player and location data
     player = get_player(user_id)
     locations = load_locations()
-    mobs_data = load_mobs()
     
-    loc = locations.get(loc_id, {})
-    loc_name = loc.get("name", loc_id)
-    
-    # Check if specific_mobs is configured for this location
-    specific_mob_ids = loc.get("specific_mobs", [])
-    
-    if specific_mob_ids:
-        # Location has specific mobs - ALWAYS trigger encounter (100% chance)
-        # Select a random mob from the specific_mobs list
-        mob_id = random.choice(specific_mob_ids)
-        
-        # Get mob data from mobs.json - search in specific_mobs[loc_id]
-        specific_mobs = mobs_data.get("specific_mobs", {})
-        mob_list = specific_mobs.get(loc_id, [])
-        mob_data = None
-        
-        for mob in mob_list:
-            if mob.get("id") == mob_id:
-                mob_data = mob
-                break
-        
-        if mob_data:
-            # Start interactive encounter fight (100% encounter)
-            await _start_interactive_expedition_encounter(user_id, mob_id, mob_data, username, context, chat_id, loc_id)
-            return
-    
-    # No specific mob configured - regular expedition result (no encounter)
-    await _send_regular_expedition_result(user_id, loc_id, username, context, chat_id)
-
-
-async def _start_interactive_expedition_encounter(user_id: int, mob_id: str, mob_data: dict, username: str, context: ContextTypes.DEFAULT_TYPE, chat_id: int, loc_id: str) -> None:
-    """Start interactive encounter fight after expedition.
-    
-    Creates a new message with fight interface if chat_id is provided.
-    """
-    # Get mob full data
-    mobs_full = load_mobs()
-    mob_full = mobs_full.get("specific_mobs", {}).get(loc_id, [])
-    mob_def = None
-    for m in mob_full:
-        if m.get("id") == mob_id:
-            mob_def = m
-            break
-    
-    if not mob_def:
-        # Fallback to mob_data
-        mob_def = mob_data
-    
+    # Get mob stats
     mob_hp = mob_def.get("hp", 30)
-    player = get_player(user_id)
     player_hp = player.get("hp", 200)
-    mob_name = mob_def.get("name", "Враг")
+    loc = locations.get(loc_id, {}) if loc_id else {}
+    loc_name = loc.get("name", loc_id) if loc_id else "Неизвестная локация"
+    mob_name = mob_def.get("name", mob_def.get("display_name", "Враг"))
     
     # Initialize fight state
     player["active_encounter_fight"] = {
@@ -511,129 +552,46 @@ async def _start_interactive_expedition_encounter(user_id: int, mob_id: str, mob
             parse_mode="HTML"
         )
     
-    logger.info(f"Interactive encounter fight started for user {user_id} with mob {mob_id}")
-
-
-async def _send_regular_expedition_result(user_id: int, loc_id: str, username: str, context: ContextTypes.DEFAULT_TYPE, chat_id: int = None) -> None:
-    """Send regular expedition result without encounter."""
-    player = get_player(user_id)
-    locations = load_locations()
-    
-    loc = locations.get(loc_id, {})
-    loc_name = loc.get("name", loc_id)
-    duration_minutes = loc.get("duration_minutes", 60)
-    
-    # Restore HP
-    max_hp = player.get("max_hp", 200)
-    hp_restored = max_hp - player.get("hp", 0)
-    
-    # Update player
-    update_player(user_id, hp=max_hp, active_expedition=None)
-    
-    message = (
-        f"✅ <b>{username}</b>, экспедиция завершена!\n\n"
-        f"📍 {loc_name}\n"
-        f"⏱️ Длительность: {duration_minutes} мин.\n\n"
-        f"❤️ HP восстановлено: {hp_restored}\n"
-        f"❤️ Текущее HP: {max_hp}/{max_hp}"
-    )
-    
-    keyboard = [
-        [InlineKeyboardButton("📍 К локациям", callback_data="adventure_locations")],
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    if chat_id:
-        await context.bot.send_message(
-            chat_id=chat_id,
-            text=message,
-            reply_markup=reply_markup,
-            parse_mode="HTML"
-        )
-    else:
-        await context.bot.send_message(
-            chat_id=user_id,
-            text=message,
-            reply_markup=reply_markup,
-            parse_mode="HTML"
-        )
+    logger.info(f"Interactive encounter fight started for user {user_id} with mob {mob_def.get('id', mob_def.get('name'))}")
 
 
 async def _expedition_complete_callback(context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Callback function for job_queue when expedition completes.
+    """Callback that runs when expedition completes - ALWAYS starts an encounter.
     
-    Job data should contain: user_id, loc_id, username, chat_id
+    This function is scheduled when expedition starts and runs after the duration expires.
+    It ALWAYS starts an encounter fight (100% chance) when called.
     """
-    job_data = context.job.data if context.job else None
-    if not job_data:
-        logger.error("No job data found for expedition completion")
-        return
+    user_id = context.job.data.get("user_id")
+    loc_id = context.job.data.get("loc_id")
+    username = context.job.data.get("username")
+    chat_id = context.job.data.get("chat_id")
     
-    user_id = job_data.get("user_id")
-    loc_id = job_data.get("loc_id")
-    username = job_data.get("username", "Гном")
-    chat_id = job_data.get("chat_id")  # chat_id where expedition was started
-    
-    if not user_id or not loc_id:
-        logger.error(f"Invalid job data: {job_data}")
-        return
-    
-    # Send expedition result
-    await send_expedition_result(user_id, loc_id, username, context, chat_id)
-
-
-async def _cancel_expedition_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Callback для возврата гнома из экспедиции."""
-    query = update.callback_query
-    await query.answer()
-    
-    user_id = query.from_user.id
     player = get_player(user_id)
     
-    if not player.get("active_expedition"):
-        await query.edit_message_text(_get_text("adventure.no_active_expedition"))
-        return
-    
-    # Get username before clearing active_expedition
-    user = query.from_user
-    username = user.first_name if user else "Гном"
-    if user.last_name:
-        username = f"{username} {user.last_name}"
-    
-    # Restore HP to max
-    old_hp = player["hp"]
-    max_hp = player.get("max_hp", 200)
-    hp_restored = max_hp - old_hp
-    
-    # Clear active_expedition
+    # Clear active expedition
     update_player(user_id, active_expedition=None)
     
-    # Get location info
-    loc_id = player.get("active_expedition", {}).get("loc_id") if player.get("active_expedition") else "unknown"
+    # Get mob for encounter
+    mobs_data = load_mobs()
     locations = load_locations()
-    loc = locations.get(loc_id, {})
-    loc_name = loc.get("name", loc_id)
     
-    # Build response message
-    message = (
-        f"✅ <b>{username}</b> возвращён из экспедиции!\n\n"
-        f"📍 Локация: {loc_name}\n"
-        f"❤️ Восстановлено HP: {hp_restored} (текущее: {max_hp}/{max_hp})"
+    mob_def, mob_desc_text_key = _select_encounter_mob(loc_id, mobs_data, locations)
+    
+    if not mob_def:
+        logger.error(f"Failed to select mob for expedition encounter at {loc_id}")
+        return
+    
+    # ALWAYS start encounter fight - 100% chance
+    await _start_interactive_expedition_encounter(
+        user_id=user_id,
+        mob_def=mob_def,
+        username=username,
+        context=context,
+        chat_id=chat_id,
+        loc_id=loc_id
     )
     
-    # Build keyboard with return to location list
-    keyboard = [
-        [InlineKeyboardButton(_get_text("adventure.back_to_locations"), callback_data="adventure_locations")],
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    await query.edit_message_text(
-        text=message,
-        reply_markup=reply_markup,
-        parse_mode="HTML"
-    )
-    
-    logger.info(f"Expedition cancelled for user {user_id} at {loc_id}")
+    logger.info(f"Expedition completed for user {user_id} at {loc_id}, encounter started")
 
 
 async def start_expedition_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1104,6 +1062,47 @@ def _format_fight_details(fight_result: dict, mob_data: dict) -> str:
     return "\n".join(lines)
 
 
+async def adventure_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Callback handler for adventure location selection and combat actions.
+    
+    Handles:
+    - adventure_locations - show location selection
+    - adventure_back - return to location list
+    - back_to_locations - return to location list
+    - adventure_cancel_expedition - cancel active expedition
+    - combat.* - combat-related actions (legacy)
+    """
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = query.from_user.id
+    data = query.data
+    
+    # Handle back to locations
+    if data in ["adventure_locations", "back_to_locations", "adventure_back"]:
+        await adventure_handler(update, context)
+        return
+    
+    # Handle cancel expedition callback
+    if data == "adventure_cancel_expedition":
+        await _cancel_expedition_callback(update, context)
+        return
+    
+    # Handle legacy combat callback (for backwards compatibility)
+    if data.startswith("combat."):
+        # This is a legacy callback - just show locations
+        await adventure_handler(update, context)
+        return
+    
+    # Handle adventure.select_location legacy callback
+    if data == "adventure.select_location":
+        await adventure_handler(update, context)
+        return
+    
+    # If no specific handler matched, show locations
+    await adventure_handler(update, context)
+
+
 def register_adventure_handlers(application) -> None:
     """Register adventure handlers with the application."""
     application.add_handler(CallbackQueryHandler(start_expedition_callback, pattern=r"^adventure_start_"))
@@ -1161,5 +1160,6 @@ async def adventure_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         )
 
 
-# Export for bot.py import
+# Exports for bot.py import
 adventure_command = adventure_handler
+adventure_callback = adventure_callback
