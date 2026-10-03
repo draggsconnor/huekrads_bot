@@ -394,7 +394,7 @@ def _get_text(key: str, **kwargs) -> str:
 async def _expedition_complete_callback(context: ContextTypes.DEFAULT_TYPE) -> None:
     """Callback function for job_queue when expedition completes.
     
-    Job data should contain: user_id, loc_id, username
+    Job data should contain: user_id, loc_id, username, chat_id
     """
     job_data = context.job.data if context.job else None
     if not job_data:
@@ -404,13 +404,14 @@ async def _expedition_complete_callback(context: ContextTypes.DEFAULT_TYPE) -> N
     user_id = job_data.get("user_id")
     loc_id = job_data.get("loc_id")
     username = job_data.get("username", "Гном")
+    chat_id = job_data.get("chat_id")  # chat_id where expedition was started
     
     if not user_id or not loc_id:
         logger.error(f"Invalid job data: {job_data}")
         return
     
     # Send expedition result
-    await send_expedition_result(user_id, loc_id, username, context)
+    await send_expedition_result(user_id, loc_id, username, context, chat_id)
 
 
 # ---------------------------------------------------------------------------
@@ -761,11 +762,12 @@ async def adventure_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             parse_mode='HTML'
         )
         
-        # Schedule completion message
-        await context.job_queue.run_once(
+        # Schedule completion message - save chat_id to send result to the same chat
+        chat_id = query.message.chat_id if query.message else user.id
+        context.job_queue.run_once(
             _expedition_complete_callback,
             duration_seconds,
-            data={"user_id": user.id, "loc_id": loc_id, "username": user.username or user.first_name}
+            data={"user_id": user.id, "loc_id": loc_id, "username": user.username or user.first_name, "chat_id": chat_id}
         )
         
         return
@@ -898,7 +900,7 @@ def calculate_expedition_result(user_id: int, loc_id: str, username: str) -> tup
     return "\n".join(summary_lines)
 
 
-async def send_expedition_result(user_id: int, loc_id: str, username: str, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def send_expedition_result(user_id: int, loc_id: str, username: str, context: ContextTypes.DEFAULT_TYPE, chat_id: int | None = None) -> None:
     """Called when expedition timer expires. Used by expiration checker and job_queue.
     
     When called from job_queue.run, the function receives context with job data.
@@ -910,6 +912,7 @@ async def send_expedition_result(user_id: int, loc_id: str, username: str, conte
         user_id = job_data.get("user_id", user_id)
         loc_id = job_data.get("loc_id", loc_id)
         username = job_data.get("username", "Гном")
+        chat_id = job_data.get("chat_id")  # Get chat_id from job data
     
     locations = load_locations()
     loc = locations.get(loc_id, {})
@@ -1026,12 +1029,13 @@ async def send_expedition_result(user_id: int, loc_id: str, username: str, conte
         )
     ]
     
-    # Send completion message
+    # Send completion message to the chat where expedition was started
+    target_chat_id = chat_id if chat_id else user_id
     try:
         await context.bot.send_message(
-            chat_id=user_id,
+            chat_id=target_chat_id,
             text="\n".join(summary_lines),
             parse_mode='HTML'
         )
     except Exception as e:
-        logger.error(f"Error sending expedition completion to user {user_id}: {e}")
+        logger.error(f"Error sending expedition completion to chat {target_chat_id}: {e}")
