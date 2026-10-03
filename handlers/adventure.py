@@ -427,16 +427,31 @@ def _locations_keyboard(locations: dict[str, Any]) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(buttons)
 
 
-def _location_details_keyboard(loc_id: str, has_encounters: bool = True) -> InlineKeyboardMarkup:
+def _location_details_keyboard(loc_id: str, has_active_expedition: bool = False) -> InlineKeyboardMarkup:
+    """Build keyboard for location details with expedition button."""
     buttons = []
-    buttons.append(
-        [InlineKeyboardButton("⚔️ Отправить гнома в экспедицию", callback_data=f"adv_expedition_{loc_id}")]
-    )
-    if has_encounters:
+    
+    # Expedition button
+    if has_active_expedition:
+        # Show cancel button if already on expedition
         buttons.append(
-            [InlineKeyboardButton("◀️ Назад", callback_data="adv_back")]
+            [InlineKeyboardButton("❌ Вернуть из экспедиции досрочно", callback_data=f"adv_cancel_expedition_{loc_id}")]
         )
+    else:
+        # Show start expedition button
+        buttons.append(
+            [InlineKeyboardButton("🚀 Отправиться в экспедицию", callback_data=f"adv_expedition_{loc_id}")]
+        )
+    
+    # Back button
+    buttons.append(
+        [InlineKeyboardButton("◀️ Назад к локациям", callback_data="adv_back")]
+    )
+    
     return InlineKeyboardMarkup(buttons)
+
+
+async def adventure_callback
 
 
 # ---------------------------------------------------------------------------
@@ -542,6 +557,50 @@ async def adventure_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             loc_text,
             reply_markup=_location_details_keyboard(loc_id),
             parse_mode='HTML',
+        )
+        return
+
+    # ------------------------------------------------------------------
+    # Cancel expedition early
+    # ------------------------------------------------------------------
+    if data.startswith("adv_cancel_expedition_"):
+        loc_id = data[len("adv_cancel_expedition_") :]
+        locations = load_locations()
+        loc = locations.get(loc_id)
+        if not loc:
+            return
+
+        player = get_player(user.id)
+        expedition = player.get("active_expedition")
+        
+        if not expedition:
+            await query.edit_message_text(
+                "🚫 У вас нет активной экспедиции!",
+                parse_mode='HTML'
+            )
+            return
+
+        # Calculate elapsed time and refund
+        start_time = datetime.fromisoformat(expedition.get("start_time"))
+        end_time = datetime.fromisoformat(expedition.get("end_time"))
+        now = datetime.now(timezone.utc)
+        
+        total_duration = (end_time - start_time).total_seconds()
+        elapsed = (now - start_time).total_seconds()
+        remaining = total_duration - elapsed
+        remaining_minutes = max(1, int(remaining / 60))
+        
+        # Return player from expedition (no rewards, just return)
+        update_player(user.id, active_expedition=None)
+        
+        await query.edit_message_text(
+            _get_text(
+                "adventure.expedition_cancelled_early",
+                username=user.username or user.first_name,
+                location_name=loc.get("name", loc_id),
+                remaining=remaining_minutes
+            ),
+            parse_mode='HTML'
         )
         return
 

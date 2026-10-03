@@ -319,3 +319,16 @@ resources_loot: |
   {resources}
 
 resource_loot_item: "{emoji} {name}: {quantity} шт. {description}"
+
+# Expedition early return
+expedition_cancel: |
+  ⏪ <b>Возврат из экспедиции</b>
+  
+  {username} досрочно вернулся из экспедиции в {location_name}.
+  
+expedition_cancel_confirm: "⏪ Вернуть из экспедиции досрочно"
+expedition_cancelled: |
+  ⏪ <b>Экспедиция прервана</b>
+  
+  {username} досрочно вернулся из экспедиции.
+  {result_message}
