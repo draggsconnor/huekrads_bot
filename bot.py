@@ -100,6 +100,7 @@ from handlers.dig import dig_command
 from handlers.adventure import (
     adventure_command,
     adventure_callback,
+    register_adventure_handlers,
 )
 from handlers.huecrab import (
     huecrab_event_job,
@@ -429,19 +430,8 @@ async def main():
         )
     )
 
-    application.add_handler(
-        CallbackQueryHandler(
-            adventure_callback,
-            pattern=r"^(adventure\.|select_location|back_to_locations|adventure_back)",
-        )
-    )
-
-    application.add_handler(
-        CallbackQueryHandler(
-            adventure_callback,
-            pattern=r"^combat\.",
-        )
-    )
+    # Register adventure handlers (expedition, encounter, etc.)
+    register_adventure_handlers(application)
 
     application.add_handler(
         CommandHandler(

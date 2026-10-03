@@ -439,13 +439,28 @@ def _select_encounter_mob(loc_id: str, mobs_data: dict[str, Any], locations: dic
             rarity = r
             break
     
+    # Ensure we always have rarity data - use common as final fallback
     rarity_data = mob_types.get(rarity, {}).get("stats", {})
     if not rarity_data:
-        return None, None
+        # Final fallback to common stats
+        rarity_data = mob_types.get("common", {}).get("stats", {
+            "hp": {"min": 20, "max": 50},
+            "attack": {"min": 5, "max": 10},
+            "defense": {"min": 1, "max": 3},
+            "speed": {"min": 1, "max": 5},
+            "crit_chance": {"min": 0.05, "max": 0.10}
+        })
+        rarity = "common"
     
-    # Generate random mob
-    names = mob_types.get(rarity, {}).get("names", {}).get(loc_id, [f"{rarity.capitalize()} Mob"])
-    name = random.choice(names)
+    # Generate random mob - ALWAYS return a mob for 100% encounter
+    names = mob_types.get(rarity, {}).get("names", {})
+    loc_names = names.get(loc_id, []) if names else []
+    if not loc_names:
+        # Fallback to any available names
+        loc_names = list(names.values())[0] if names else []
+    if not loc_names:
+        loc_names = [f"{rarity.capitalize()} Mob"]
+    name = random.choice(loc_names)
     
     return (
         {
@@ -594,66 +609,45 @@ async def _expedition_complete_callback(context: ContextTypes.DEFAULT_TYPE) -> N
     logger.info(f"Expedition completed for user {user_id} at {loc_id}, encounter started")
 
 
-async def start_expedition_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Callback для отправки гнома в экспедицию с кнопкой возврата."""
+async def _cancel_expedition_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Callback to cancel active expedition."""
     query = update.callback_query
     await query.answer()
     
     user_id = query.from_user.id
     player = get_player(user_id)
     
-    # Check if already in expedition
-    if player.get("active_expedition"):
-        await query.edit_message_text(_get_text("adventure.already_in_expedition"))
+    # Check if user has active expedition
+    if not player.get("active_expedition"):
+        await query.edit_message_text("⚠️ У вас нет активной экспедиции")
         return
     
-    # Extract loc_id from callback data (format: adventure_start_XXX)
-    loc_id = query.data.replace("adventure_start_", "")
+    # Get expedition info
+    expedition_data = player.get("active_expedition", {})
+    loc_name = expedition_data.get("loc_name", "неизвестной локации")
+    username = query.from_user.first_name or "Гном"
+    if query.from_user.last_name:
+        username = f"{username} {query.from_user.last_name}"
     
-    # Get location info
-    locations = load_locations()
-    loc = locations.get(loc_id, {})
-    if not loc:
-        await query.edit_message_text(f"❌ Локация {loc_id} не найдена")
-        return
+    # Cancel expedition
+    update_player(user_id, active_expedition=None)
     
-    loc_name = loc.get("name", loc_id)
-    duration_minutes = loc.get("duration_minutes", 60)
-    duration_seconds = duration_minutes * 60
-    
-    user = query.from_user
-    username = user.first_name if user else "Гном"
-    if user.last_name:
-        username = f"{username} {user.last_name}"
-    
-    # Set active expedition
-    expedition_data = {
-        "loc_id": loc_id,
-        "loc_name": loc_name,
-        "start_time": datetime.now(timezone.utc).isoformat(),
-        "duration_seconds": duration_seconds,
-    }
-    update_player(user_id, active_expedition=expedition_data)
-    
-    # Schedule completion callback
+    # Cancel scheduled job if exists
     job_queue = context.job_queue
-    job_queue.run_once(
-        _expedition_complete_callback,
-        duration_seconds,
-        data={"user_id": user_id, "loc_id": loc_id, "username": username, "chat_id": query.message.chat_id}
-    )
+    jobs = job_queue.get_jobs_by_name(f"expedition_{user_id}")
+    for job in jobs:
+        job.schedule_removal()
     
-    # Build response with cancel button
+    # Show confirmation
     keyboard = [
-        [InlineKeyboardButton("🔄 Вернуть из экспедиции", callback_data="adventure_cancel_expedition")],
+        [InlineKeyboardButton(_get_text("adventure.back_to_locations"), callback_data="adventure_locations")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     message = (
-        f"🗺️ <b>{username}</b> отправляется в экспедицию!\n\n"
-        f"📍 Локация: {loc_name}\n"
-        f"⏱️ Длительность: {duration_minutes} мин.\n\n"
-        f"Используйте кнопку ниже чтобы вернуть гнома досрочно."
+        f"✅ Экспедиция отменена!\n\n"
+        f"🗺️ {username} вернулся из {loc_name}.\n\n"
+        f"Готов к новым приключениям!"
     )
     
     await query.edit_message_text(
@@ -662,7 +656,7 @@ async def start_expedition_callback(update: Update, context: ContextTypes.DEFAUL
         parse_mode="HTML"
     )
     
-    logger.info(f"Expedition started for user {user_id} at {loc_id}")
+    logger.info(f"Expedition cancelled for user {user_id}")
 
 
 # ---------------------------------------------------------------------------
