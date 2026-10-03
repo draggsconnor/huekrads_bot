@@ -432,7 +432,14 @@ async def main():
     application.add_handler(
         CallbackQueryHandler(
             adventure_callback,
-            pattern=r"^adv_",
+            pattern=r"^(adventure\.|select_location|back_to_locations|adventure_back)",
+        )
+    )
+
+    application.add_handler(
+        CallbackQueryHandler(
+            adventure_callback,
+            pattern=r"^combat\.",
         )
     )
 
