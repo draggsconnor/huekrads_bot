@@ -16,9 +16,12 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import ContextTypes
+from telegram.ext import CallbackQueryHandler, ContextTypes, ConversationHandler
 
 from text_resources import get_text
+
+# States for interactive encounter fight
+WAITING_FOR_PLAYER_ACTION = 1
 
 logger = logging.getLogger(__name__)
 
@@ -296,18 +299,20 @@ def _select_encounter_mob(loc_id: str, mobs_data: dict[str, Any], locations: dic
                     weighted_pool.append((mob_id, mob_def, encounter_chance))
             
             if weighted_pool:
-                # Select mob based on weights
+                # Select mob based on weights - always encounter (100% chance)
                 total_weight = sum(w[2] for w in weighted_pool)
                 rand = random.random() * total_weight
                 cumulative = 0
                 for mob_id, mob_def, weight in weighted_pool:
-                    cumulative += weight
-                    if rand <= cumulative:
+                    # Use 1.0 for 100% encounter chance
+                    cumulative += 1.0
+                    if rand <= total_weight:  # Always select a mob
                         # Return mob with its name and desc text keys
                         mob_name_text_key = f"{mob_id}_name"
                         mob_desc_text_key = f"{mob_id}_desc"
                         
                         mob_tactics = mob_def.get("tactics", {})
+                        # Return mob with 100% encounter chance
                         return (
                             {
                                 "id": mob_id,
@@ -326,6 +331,7 @@ def _select_encounter_mob(loc_id: str, mobs_data: dict[str, Any], locations: dic
                                 "overpower": mob_tactics.get("overpower", False),
                                 "has_suck_ability": mob_id == "head_on_spider_legs",  # special for head mob
                                 "turns_to_kill": mob_def.get("turns_to_kill", 3),  # for head_on_spider_legs
+                                "encounter_chance": 1.0,  # 100% encounter chance
                             },
                             mob_desc_text_key
                         )
@@ -391,6 +397,160 @@ def _get_text(key: str, **kwargs) -> str:
         return key
 
 
+# ---------------------------------------------------------------------------
+# Callback handlers
+# ---------------------------------------------------------------------------
+
+async def send_expedition_result(user_id: int, loc_id: str, username: str, context: ContextTypes.DEFAULT_TYPE, chat_id: int = None) -> None:
+    """Send expedition result to player with encounter fight if applicable.
+    
+    If an encounter occurred, starts interactive fight. Otherwise sends regular result.
+    """
+    # Get player and location data
+    player = get_player(user_id)
+    locations = load_locations()
+    mobs_data = load_mobs()
+    
+    loc = locations.get(loc_id, {})
+    loc_name = loc.get("name", loc_id)
+    
+    # Check if mob is configured for this location
+    specific_mob_ids = loc.get("specific_mobs", [])
+    
+    if specific_mob_ids:
+        # There's a configured mob - trigger encounter with 100% chance
+        mob_id = random.choice(specific_mob_ids)
+        mob_def = mobs_data.get("specific_mobs", {}).get(loc_id, [])
+        mob_data = None
+        for mob in mob_def:
+            if mob.get("id") == mob_id:
+                mob_data = mob
+                break
+        
+        if mob_data:
+            # Start interactive encounter fight
+            await _start_interactive_expedition_encounter(user_id, mob_id, mob_data, username, context, chat_id, loc_id)
+            return
+    
+    # No specific mob - regular expedition result (no encounter)
+    await _send_regular_expedition_result(user_id, loc_id, username, context, chat_id)
+
+
+async def _start_interactive_expedition_encounter(user_id: int, mob_id: str, mob_data: dict, username: str, context: ContextTypes.DEFAULT_TYPE, chat_id: int, loc_id: str) -> None:
+    """Start interactive encounter fight after expedition.
+    
+    Creates a new message with fight interface if chat_id is provided.
+    """
+    # Get mob full data
+    mobs_full = load_mobs()
+    mob_full = mobs_full.get("specific_mobs", {}).get(loc_id, [])
+    mob_def = None
+    for m in mob_full:
+        if m.get("id") == mob_id:
+            mob_def = m
+            break
+    
+    if not mob_def:
+        # Fallback to mob_data
+        mob_def = mob_data
+    
+    mob_hp = mob_def.get("hp", 30)
+    player = get_player(user_id)
+    player_hp = player.get("hp", 200)
+    mob_name = mob_def.get("name", "Враг")
+    
+    # Initialize fight state
+    player["active_encounter_fight"] = {
+        "mob_data": mob_def,
+        "current_player_hp": player_hp,
+        "current_mob_hp": mob_hp,
+        "rounds": [],
+        "player_debuffed": False,
+        "loc_id": loc_id,
+    }
+    save_player_data(player)
+    
+    # Build fight message
+    message = (
+        f"⚔️ <b>{username}</b>, экспедиция завершена!\n\n"
+        f"📍 {loc_name}\n"
+        f"💀 Встречен враг: {mob_name}\n\n"
+        f"⚔️ <b>Начался бой!</b>\n\n"
+        f"❤️ Ваше HP: {player_hp}\n"
+        f"💀 HP врага: {mob_hp}\n\n"
+        f"Выберите действие:"
+    )
+    
+    keyboard = [
+        [InlineKeyboardButton("⚔️ Атака", callback_data="encounter_attack"), InlineKeyboardButton("🛡️ Блок", callback_data="encounter_block")],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    # Send message to chat where expedition was started
+    if chat_id:
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=message,
+            reply_markup=reply_markup,
+            parse_mode="HTML"
+        )
+    else:
+        # Fallback to user's private chat
+        await context.bot.send_message(
+            chat_id=user_id,
+            text=message,
+            reply_markup=reply_markup,
+            parse_mode="HTML"
+        )
+    
+    logger.info(f"Interactive encounter fight started for user {user_id} with mob {mob_id}")
+
+
+async def _send_regular_expedition_result(user_id: int, loc_id: str, username: str, context: ContextTypes.DEFAULT_TYPE, chat_id: int = None) -> None:
+    """Send regular expedition result without encounter."""
+    player = get_player(user_id)
+    locations = load_locations()
+    
+    loc = locations.get(loc_id, {})
+    loc_name = loc.get("name", loc_id)
+    duration_minutes = loc.get("duration_minutes", 60)
+    
+    # Restore HP
+    max_hp = player.get("max_hp", 200)
+    hp_restored = max_hp - player.get("hp", 0)
+    
+    # Update player
+    update_player(user_id, hp=max_hp, active_expedition=None)
+    
+    message = (
+        f"✅ <b>{username}</b>, экспедиция завершена!\n\n"
+        f"📍 {loc_name}\n"
+        f"⏱️ Длительность: {duration_minutes} мин.\n\n"
+        f"❤️ HP восстановлено: {hp_restored}\n"
+        f"❤️ Текущее HP: {max_hp}/{max_hp}"
+    )
+    
+    keyboard = [
+        [InlineKeyboardButton("📍 К локациям", callback_data="adventure_locations")],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    if chat_id:
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=message,
+            reply_markup=reply_markup,
+            parse_mode="HTML"
+        )
+    else:
+        await context.bot.send_message(
+            chat_id=user_id,
+            text=message,
+            reply_markup=reply_markup,
+            parse_mode="HTML"
+        )
+
+
 async def _expedition_complete_callback(context: ContextTypes.DEFAULT_TYPE) -> None:
     """Callback function for job_queue when expedition completes.
     
@@ -414,628 +574,541 @@ async def _expedition_complete_callback(context: ContextTypes.DEFAULT_TYPE) -> N
     await send_expedition_result(user_id, loc_id, username, context, chat_id)
 
 
-# ---------------------------------------------------------------------------
-# Keyboard builders
-# ---------------------------------------------------------------------------
-
-def _locations_keyboard(locations: dict[str, Any]) -> InlineKeyboardMarkup:
-    buttons = []
-    for loc_id, loc in locations.items():
-        btn_text = loc.get("name", loc_id)
-        buttons.append(
-            [InlineKeyboardButton(btn_text, callback_data=f"adv_loc_{loc_id}")]
-        )
-    return InlineKeyboardMarkup(buttons)
-
-
-def _location_details_keyboard(loc_id: str, has_active_expedition: bool = False) -> InlineKeyboardMarkup:
-    """Build keyboard for location details with expedition button."""
-    buttons = []
-    
-    # Expedition button
-    if has_active_expedition:
-        # Show cancel button if already on expedition
-        buttons.append(
-            [InlineKeyboardButton("❌ Вернуть из экспедиции досрочно", callback_data=f"adv_cancel_expedition_{loc_id}")]
-        )
-    else:
-        # Show start expedition button
-        buttons.append(
-            [InlineKeyboardButton("🚀 Отправиться в экспедицию", callback_data=f"adv_expedition_{loc_id}")]
-        )
-    
-    # Back button
-    buttons.append(
-        [InlineKeyboardButton("◀️ Назад к локациям", callback_data="adv_back")]
-    )
-    
-    return InlineKeyboardMarkup(buttons)
-
-
-# ---------------------------------------------------------------------------
-# Main handlers
-# ---------------------------------------------------------------------------
-
-async def adventure_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Entry point: /adventure — show available locations."""
-    locations = load_locations()
-    text = _get_text("adventure.welcome")
-    await update.effective_message.reply_text(
-        text, reply_markup=_locations_keyboard(locations), parse_mode='HTML'
-    )
-
-
-async def adventure_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle all adventure inline callbacks."""
+async def _cancel_expedition_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Callback для возврата гнома из экспедиции."""
     query = update.callback_query
     await query.answer()
-
-    data = query.data or ""
-    user = update.effective_user
-    if not user:
+    
+    user_id = query.from_user.id
+    player = get_player(user_id)
+    
+    if not player.get("active_expedition"):
+        await query.edit_message_text(_get_text("adventure.no_active_expedition"))
         return
+    
+    # Get username before clearing active_expedition
+    user = query.from_user
+    username = user.first_name if user else "Гном"
+    if user.last_name:
+        username = f"{username} {user.last_name}"
+    
+    # Restore HP to max
+    old_hp = player["hp"]
+    max_hp = player.get("max_hp", 200)
+    hp_restored = max_hp - old_hp
+    
+    # Clear active_expedition
+    update_player(user_id, active_expedition=None)
+    
+    # Get location info
+    loc_id = player.get("active_expedition", {}).get("loc_id") if player.get("active_expedition") else "unknown"
+    locations = load_locations()
+    loc = locations.get(loc_id, {})
+    loc_name = loc.get("name", loc_id)
+    
+    # Build response message
+    message = (
+        f"✅ <b>{username}</b> возвращён из экспедиции!\n\n"
+        f"📍 Локация: {loc_name}\n"
+        f"❤️ Восстановлено HP: {hp_restored} (текущее: {max_hp}/{max_hp})"
+    )
+    
+    # Build keyboard with return to location list
+    keyboard = [
+        [InlineKeyboardButton(_get_text("adventure.back_to_locations"), callback_data="adventure_locations")],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await query.edit_message_text(
+        text=message,
+        reply_markup=reply_markup,
+        parse_mode="HTML"
+    )
+    
+    logger.info(f"Expedition cancelled for user {user_id} at {loc_id}")
 
-    # ------------------------------------------------------------------
-    # Back to locations list
-    # ------------------------------------------------------------------
-    if data == "adv_back":
-        locations = load_locations()
-        await query.edit_message_text(
-            _get_text("adventure.welcome"),
-            reply_markup=_locations_keyboard(locations),
-            parse_mode='HTML',
-        )
+
+async def start_expedition_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Callback для отправки гнома в экспедицию с кнопкой возврата."""
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = query.from_user.id
+    player = get_player(user_id)
+    
+    # Check if already in expedition
+    if player.get("active_expedition"):
+        await query.edit_message_text(_get_text("adventure.already_in_expedition"))
         return
-
-    # ------------------------------------------------------------------
-    # Cancel / close
-    # ------------------------------------------------------------------
-    if data == "adv_cancel":
-        await query.edit_message_text(_get_text("adventure.cancelled"), parse_mode='HTML')
+    
+    # Extract loc_id from callback data (format: adventure_start_XXX)
+    loc_id = query.data.replace("adventure_start_", "")
+    
+    # Get location info
+    locations = load_locations()
+    loc = locations.get(loc_id, {})
+    if not loc:
+        await query.edit_message_text(f"❌ Локация {loc_id} не найдена")
         return
+    
+    loc_name = loc.get("name", loc_id)
+    duration_minutes = loc.get("duration_minutes", 60)
+    duration_seconds = duration_minutes * 60
+    
+    user = query.from_user
+    username = user.first_name if user else "Гном"
+    if user.last_name:
+        username = f"{username} {user.last_name}"
+    
+    # Set active expedition
+    expedition_data = {
+        "loc_id": loc_id,
+        "loc_name": loc_name,
+        "start_time": datetime.now(timezone.utc).isoformat(),
+        "duration_seconds": duration_seconds,
+    }
+    update_player(user_id, active_expedition=expedition_data)
+    
+    # Schedule completion callback
+    job_queue = context.job_queue
+    job_queue.run_once(
+        _expedition_complete_callback,
+        duration_seconds,
+        data={"user_id": user_id, "loc_id": loc_id, "username": username, "chat_id": query.message.chat_id}
+    )
+    
+    # Build response with cancel button
+    keyboard = [
+        [InlineKeyboardButton("🔄 Вернуть из экспедиции", callback_data="adventure_cancel_expedition")],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    message = (
+        f"🗺️ <b>{username}</b> отправляется в экспедицию!\n\n"
+        f"📍 Локация: {loc_name}\n"
+        f"⏱️ Длительность: {duration_minutes} мин.\n\n"
+        f"Используйте кнопку ниже чтобы вернуть гнома досрочно."
+    )
+    
+    await query.edit_message_text(
+        text=message,
+        reply_markup=reply_markup,
+        parse_mode="HTML"
+    )
+    
+    logger.info(f"Expedition started for user {user_id} at {loc_id}")
 
-    # ------------------------------------------------------------------
-    # Location selected — show details
-    # ------------------------------------------------------------------
-    if data.startswith("adv_loc_"):
-        loc_id = data[len("adv_loc_") :]
-        locations = load_locations()
-        loc = locations.get(loc_id)
-        if not loc:
-            await query.edit_message_text(_get_text("adventure.unknown"), parse_mode='HTML')
-            return
-        
-        player = get_player(user.id)
-        required_level = loc.get("required_level", 1)
-        
-        # Проверяем активную экспедицию ПЕРВЫМ делом
-        active_exp = player.get("active_expedition")
-        has_active_expedition = False
-        
-        # Проверяем если экспедиция истекла по времени - сбрасываем
-        if active_exp is not None and isinstance(active_exp, dict):
-            end_time = active_exp.get("end_time")
-            if end_time:
-                try:
-                    end_dt = datetime.fromisoformat(end_time.replace("Z", "+00:00")) if "Z" in end_time else datetime.fromisoformat(end_time)
-                    now = datetime.now(timezone.utc)
-                    if now >= end_dt:
-                        # Экспедиция истекла - сбрасываем
-                        update_player(user.id, active_expedition=None)
-                        active_exp = None
-                except (ValueError, TypeError) as e:
-                    logger.warning(f"Error parsing expedition end_time: {e}")
-        
-        has_active_expedition = active_exp is not None
-        
-        # Level check
-        if player.get("lvl", 1) < required_level:
-            await query.edit_message_text(
-                _get_text("adventure.low_level", level=required_level),
-                parse_mode='HTML',
-            )
-            return
 
-        # Получаем информацию об активной экспедиции если есть
-        expedition_info = None
-        if has_active_expedition and isinstance(active_exp, dict):
-            start_time = active_exp.get("start_time")
-            end_time = active_exp.get("end_time")
-            exp_loc_name = active_exp.get("location_name", "Неизвестно")
-            
-            if start_time and end_time:
-                start_dt = datetime.fromisoformat(start_time.replace("Z", "+00:00")) if "Z" in start_time else datetime.fromisoformat(start_time)
-                end_dt = datetime.fromisoformat(end_time.replace("Z", "+00:00")) if "Z" in end_time else datetime.fromisoformat(end_time)
-                now = datetime.now(timezone.utc)
-                
-                total_duration = (end_dt - start_dt).total_seconds()
-                elapsed = (now - start_dt).total_seconds()
-                remaining = max(0, total_duration - elapsed)
-                remaining_minutes = int(remaining / 60)
-                remaining_seconds = int(remaining) % 60
-                
-                expedition_info = {
-                    "location": exp_loc_name,
-                    "remaining_minutes": remaining_minutes,
-                    "remaining_seconds": remaining_seconds
-                }
+# ---------------------------------------------------------------------------
+# Interactive Encounter Fight
+# ---------------------------------------------------------------------------
 
-        # Get boss chance and name from first boss in bosses list
-        boss_chance = "0"
-        boss_name = "Нет данных"
-        bosses = loc.get("bosses", [])
-        if bosses:
-            first_boss = bosses[0]
-            boss_name = first_boss.get("display_name", first_boss.get("name", "Нет данных"))
-            boss_chance = str(int(first_boss.get("encounter_chance", 0) * 100))
-        
-        # Format rewards from resources (which serves as loot table)
-        rewards_text = _get_text("adventure.resources_loot")  # Default rewards text
-        resources = loc.get("resources", [])
-        if resources:
-            # Build rewards list from resources
-            rewards_items = []
-            for item in resources:
-                item_name = item.get("name", item.get("id", "Resource"))
-                chance = int(item.get("chance", 0) * 100)
-                rewards_items.append(f"{item_name} ({chance}%)")
-            if rewards_items:
-                rewards_text = "• " + "\n• ".join(rewards_items)
-        
-        # Build location detail text
-        loc_text = _get_text(
-            "adventure.location_detailed_info",
-            username=user.username or user.first_name,
-            location_emoji=loc.get("display_name", "")[:2] if loc.get("display_name") else "🌲",
-            location_name=loc.get("name", loc_id),
-            location_description=loc.get("full_description", ""),
-            min_level=loc.get("requirements", {}).get("min_level", 1),
-            duration=loc.get("duration_minutes", 5),
-            rewards=rewards_text,
-            boss_name=boss_name,
-            boss_chance=boss_chance,
-        )
-        
-        # Добавляем информацию об активной экспедиции если есть
-        if has_active_expedition and expedition_info:
-            loc_text += f"\n\n⏳ <b>Гном в экспедиции:</b>\n📍 {expedition_info['location']}\n⏱️ Осталось: {expedition_info['remaining_minutes']} мин. {expedition_info['remaining_seconds']} сек."
-        
-        await query.edit_message_text(
-            loc_text,
-            reply_markup=_location_details_keyboard(loc_id, has_active_expedition=has_active_expedition),
-            parse_mode='HTML',
-        )
-        return
+def _create_encounter_fight_keyboard(player_action: str = None) -> InlineKeyboardMarkup:
+    """Create inline keyboard for interactive encounter fight."""
+    if player_action == "attack":
+        keyboard = [
+            [InlineKeyboardButton("⚔️ Атака", callback_data="encounter_attack"), InlineKeyboardButton("🛡️ Блок", callback_data="encounter_block")],
+        ]
+    else:
+        keyboard = [
+            [InlineKeyboardButton("⚔️ Атака", callback_data="encounter_attack"), InlineKeyboardButton("🛡️ Блок", callback_data="encounter_block")],
+        ]
+    return InlineKeyboardMarkup(keyboard)
 
-    # ------------------------------------------------------------------
-    # Cancel expedition early
-    # ------------------------------------------------------------------
-    if data.startswith("adv_cancel_expedition_"):
-        loc_id = data[len("adv_cancel_expedition_") :]
-        logger.info(f"Cancel expedition callback: loc_id={loc_id}, user_id={user.id}")
-        
-        locations = load_locations()
-        loc = locations.get(loc_id)
-        if not loc:
-            logger.error(f"Unknown location: {loc_id}")
-            await query.edit_message_text("❌ Неизвестная локация!", parse_mode='HTML')
-            return
 
-        player = get_player(user.id)
-        expedition = player.get("active_expedition")
+async def _handle_encounter_fight_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle interactive encounter fight callbacks."""
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = query.from_user.id
+    player = get_player(user_id)
+    
+    # Get active encounter fight state
+    encounter_state = player.get("active_encounter_fight")
+    
+    if not encounter_state:
+        await query.edit_message_text("⚠️ Бой не активен")
+        return ConversationHandler.END
+    
+    mob_data = encounter_state.get("mob_data", {})
+    current_player_hp = encounter_state.get("current_player_hp", player["hp"])
+    current_mob_hp = encounter_state.get("current_mob_hp", mob_data.get("hp", 30))
+    rounds = encounter_state.get("rounds", [])
+    mob_name = mob_data.get("name", "Враг")
+    player_debuffed = encounter_state.get("player_debuffed", False)
+    
+    # Check if fight is already over
+    if current_mob_hp <= 0 or current_player_hp <= 0:
+        await query.edit_message_text("⚔️ Бой уже завершен")
+        return ConversationHandler.END
+    
+    # Get player action from callback
+    player_action = query.data
+    
+    # Player's turn
+    if player_action == "encounter_attack":
+        # Player attacks
+        from handlers.adventure import _roll_damage
+        dmg_to_mob = _roll_damage(10, 3)
+        current_mob_hp -= dmg_to_mob
         
-        logger.info(f"Player active_expedition: {expedition}")
-        
-        if not expedition:
-            logger.warning(f"User {user.id} tried to cancel but has no active expedition")
-            await query.edit_message_text(
-                "🚫 У вас нет активной экспедиции!",
-                parse_mode='HTML'
-            )
-            return
-
-        # Calculate elapsed time and refund
-        expedition_start = expedition.get("start_time")
-        expedition_end = expedition.get("end_time")
-        start_dt = datetime.fromisoformat(expedition_start.replace("Z", "+00:00")) if "Z" in expedition_start else datetime.fromisoformat(expedition_start)
-        end_dt = datetime.fromisoformat(expedition_end.replace("Z", "+00:00")) if "Z" in expedition_end else datetime.fromisoformat(expedition_end)
-        now = datetime.now(timezone.utc)
-        
-        total_duration = (end_dt - start_dt).total_seconds()
-        elapsed = (now - start_dt).total_seconds()
-        remaining = total_duration - elapsed
-        remaining_minutes = max(1, int(remaining / 60))
-        
-        # Force clear active_expedition
-        update_player(user.id, active_expedition=None)
-        logger.info(f"Expedition cancelled for user {user.id}. Remaining time: {remaining_minutes} min")
-        
-        # Get boss and reward info for display
-        boss_chance = "0"
-        boss_name = "Нет данных"
-        bosses = loc.get("bosses", [])
-        if bosses:
-            first_boss = bosses[0]
-            boss_name = first_boss.get("display_name", first_boss.get("name", "Нет данных"))
-            boss_chance = str(int(first_boss.get("encounter_chance", 0) * 100))
-        
-        # Format rewards from resources
-        rewards_text = _get_text("adventure.resources_loot")
-        resources = loc.get("resources", [])
-        if resources:
-            rewards_items = []
-            for item in resources:
-                item_name = item.get("name", item.get("id", "Resource"))
-                chance = int(item.get("chance", 0) * 100)
-                rewards_items.append(f"{item_name} ({chance}%)")
-            if rewards_items:
-                rewards_text = "• " + "\n• ".join(rewards_items)
-        
-        # Show location menu again with expedition cleared
-        loc_text = _get_text(
-            "adventure.location_detailed_info",
-            username=user.username or user.first_name,
-            location_emoji=loc.get("display_name", "")[:2] if loc.get("display_name") else "🌲",
-            location_name=loc.get("name", loc_id),
-            location_description=loc.get("full_description", ""),
-            min_level=loc.get("requirements", {}).get("min_level", 1),
-            duration=loc.get("duration_minutes", 5),
-            rewards=rewards_text,
-            boss_name=boss_name,
-            boss_chance=boss_chance,
-        )
-        loc_text += f"\n\n✅ <b>Гном возвращён из экспедиции!</b>\nОсталось времени: {remaining_minutes} мин."
-        
-        await query.edit_message_text(
-            loc_text,
-            reply_markup=_location_details_keyboard(loc_id, has_active_expedition=False),
-            parse_mode='HTML'
-        )
-        return
-
-    # ------------------------------------------------------------------
-    # Start expedition
-    # ------------------------------------------------------------------
-    if data.startswith("adv_expedition_"):
-        loc_id = data[len("adv_expedition_") :]
-        logger.info(f"Start expedition callback: loc_id={loc_id}, user_id={user.id}")
-        
-        locations = load_locations()
-        loc = locations.get(loc_id)
-        if not loc:
-            logger.error(f"Unknown location: {loc_id}")
-            return
-
-        player = get_player(user.id)
-        logger.info(f"Player data before expedition: {player}")
-        
-        # Check if already on expedition
-        if player.get("active_expedition"):
-            logger.warning(f"User {user.id} tried to start expedition but already has active_expedition: {player.get('active_expedition')}")
-            # Show detailed info about current expedition
-            current_exp = player.get("active_expedition", {})
-            exp_loc_name = current_exp.get("location_name", "Неизвестно")
-            await query.edit_message_text(
-                f"⏳ Вы уже в экспедиции!\n📍 Локация: {exp_loc_name}\n\nИспользуйте кнопку 'Вернуть из экспедиции' чтобы досрочно вернуться.",
-                parse_mode='HTML'
-            )
-            return
-
-        # Check level
-        required_level = loc.get("required_level", 1)
-        if player.get("lvl", 1) < required_level:
-            await query.edit_message_text(
-                _get_text("adventure.low_level", level=required_level),
-                parse_mode='HTML',
-            )
-            return
-
-        duration_seconds = loc.get("duration", 300)  # default 5 minutes
-        duration_minutes = duration_seconds // 60
-        
-        # Create expedition record
-        expedition_start = datetime.now(timezone.utc)
-        expedition_end = expedition_start + timedelta(seconds=duration_seconds)
-        
-        expedition_data = {
-            "location_id": loc_id,
-            "location_name": loc.get("name", loc_id),
-            "start_time": expedition_start.isoformat(),
-            "end_time": expedition_end.isoformat(),
-            "duration_seconds": duration_seconds,
+        round_data = {
+            "round": len(rounds) + 1,
+            "player_action": "attack",
+            "player_dmg": dmg_to_mob,
         }
+    elif player_action == "encounter_block":
+        # Player blocks - reduce damage by 50%
+        round_data = {
+            "round": len(rounds) + 1,
+            "player_action": "block",
+            "player_dmg": 0,
+        }
+        damage_reduction = 0.5
+    else:
+        await query.edit_message_text("⚠️ Неверное действие")
+        return ConversationHandler.END
+    
+    # Mob's turn
+    if current_mob_hp > 0:
+        # Check if player is stunned from debuff
+        if player_debuffed and random.random() < 0.3:
+            round_data["player_stunned"] = True
+            player_debuffed = False
+        else:
+            # Mob attacks
+            mob_dmg_base = mob_data.get("dmg", 5)
+            is_crit = random.random() < mob_data.get("crit_chance", 0.1)
+            base_dmg = mob_dmg_base * 2 if is_crit else mob_dmg_base
+            mob_dmg = _roll_damage(int(base_dmg), 2)
+            
+            if player_action == "encounter_block":
+                mob_dmg = int(mob_dmg * damage_reduction)
+            
+            current_player_hp -= mob_dmg
+            round_data["mob_dmg"] = mob_dmg
+            round_data["mob_crit"] = is_crit
+    
+    rounds.append(round_data)
+    
+    # Update state
+    player["active_encounter_fight"] = {
+        "mob_data": mob_data,
+        "current_player_hp": current_player_hp,
+        "current_mob_hp": current_mob_hp,
+        "rounds": rounds,
+        "player_debuffed": player_debuffed,
+    }
+    save_player_data(player)
+    
+    # Build fight message
+    player_hp_display = max(0, current_player_hp)
+    mob_hp_display = max(0, current_mob_hp)
+    mob_action = round_data.get("mob_dmg", 0)
+    mob_crit = round_data.get("mob_crit", False)
+    player_stunned = round_data.get("player_stunned", False)
+    
+    if player_action == "encounter_attack":
+        attack_text = f"✅ Ваш удар! {dmg_to_mob} урона по {mob_name}"
+    else:
+        attack_text = "🛡️ Вы блокируете атаку"
+    
+    if player_stunned:
+        attack_text += " ⚡(Паранойя: пропуск хода!)"
+    
+    if mob_action > 0:
+        mob_attack_text = f"⚔️ {mob_name} атакует: {mob_action} урона"
+        if mob_crit:
+            mob_attack_text += " 💣КРИТ!"
+    else:
+        mob_attack_text = f"🛡️ {mob_name} промахивается"
+    
+    message = (
+        f"⚔️ <b>Бой с {mob_name}</b>\n\n"
+        f"{attack_text}\n"
+        f"{mob_attack_text}\n\n"
+        f"❤️ Ваше HP: {player_hp_display}\n"
+        f"💀 HP врага: {mob_hp_display}"
+    )
+    
+    # Check for win/loss
+    if current_mob_hp <= 0:
+        # Victory
+        player["active_encounter_fight"] = None
+        save_player_data(player)
         
-        update_player(user.id, active_expedition=expedition_data)
+        xp_gained = int(mob_data.get("xp_reward", 50))
+        gold_gained = int(mob_data.get("gold_reward", 20))
         
-        # Delete the location message and send expedition start message
-        await query.delete_message()
+        # Update player stats
+        new_xp = player.get("xp", 0) + xp_gained
+        new_gold = player.get("gold", 0) + gold_gained
+        new_level = player.get("lvl", 1)
+        new_total_fights = player.get("total_fights", 0) + 1
+        new_wins = player.get("wins", 0) + 1
         
-        expedition_text = _get_text(
-            "adventure.expedition_start",
-            username=user.username or user.first_name,
-            location_name=loc.get("name", loc_id),
-            duration=duration_minutes
+        # Check level up
+        xp_to_next = new_level * 100
+        level_up = False
+        new_max_hp = player.get("max_hp", 200)
+        if new_xp >= xp_to_next:
+            new_xp -= xp_to_next
+            new_level += 1
+            level_up = True
+            new_max_hp = player.get("max_hp", 200) + 20
+        
+        update_player(
+            user_id,
+            hp=player_hp_display,
+            xp=new_xp,
+            gold=new_gold,
+            lvl=new_level,
+            max_hp=new_max_hp,
+            total_fights=new_total_fights,
+            wins=new_wins,
         )
-        await context.bot.send_message(
-            chat_id=user.id,
-            text=expedition_text,
-            parse_mode='HTML'
-        )
         
-        # Schedule completion message - save chat_id to send result to the same chat
-        chat_id = query.message.chat_id if query.message else user.id
-        context.job_queue.run_once(
-            _expedition_complete_callback,
-            duration_seconds,
-            data={"user_id": user.id, "loc_id": loc_id, "username": user.username or user.first_name, "chat_id": chat_id}
+        victory_msg = (
+            f"🏆 <b>ПОБЕДА!</b>\n\n"
+            f"Вы одолели {mob_name}!\n\n"
+            f"⭐ Опыт: +{xp_gained}\n"
+            f"💰 Золото: +{gold_gained}"
         )
+        if level_up:
+            victory_msg += f"\n\n⭐ <b>НОВЫЙ УРОВЕНЬ! {new_level}</b>"
         
-        return
-
-    # ------------------------------------------------------------------
-    # Legacy boss-related callbacks (deprecated but kept for compatibility)
-    # ------------------------------------------------------------------
-    if data.startswith("adv_boss_") or data.startswith("adv_fight_"):
+        keyboard = [
+            [InlineKeyboardButton(_get_text("adventure.back_to_locations"), callback_data="adventure_locations")],
+        ]
         await query.edit_message_text(
-            "⚠️ Этот функционал обновлен. Используйте экспедиции!",
-            parse_mode='HTML'
+            text=victory_msg,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="HTML"
         )
+        return ConversationHandler.END
+    
+    elif current_player_hp <= 0:
+        # Defeat
+        player["active_encounter_fight"] = None
+        save_player_data(player)
+        
+        update_player(user_id, hp=0)
+        
+        defeat_msg = (
+            f"💀 <b>ПОРАЖЕНИЕ</b>\n\n"
+            f"{mob_name} оказался сильнее.\n\n"
+            f"Попробуйте еще раз!"
+        )
+        
+        keyboard = [
+            [InlineKeyboardButton(_get_text("adventure.back_to_locations"), callback_data="adventure_locations")],
+        ]
+        await query.edit_message_text(
+            text=defeat_msg,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="HTML"
+        )
+        return ConversationHandler.END
+    
+    # Continue fight
+    await query.edit_message_text(
+        text=message,
+        reply_markup=_create_encounter_fight_keyboard(player_action),
+        parse_mode="HTML"
+    )
+    
+    return WAITING_FOR_PLAYER_ACTION
+
+
+async def start_interactive_encounter_fight(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Start an interactive encounter fight."""
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = query.from_user.id
+    player = get_player(user_id)
+    
+    # Get encounter data from callback
+    parts = query.data.split("_")
+    if len(parts) < 4:
+        await query.edit_message_text("❌ Неверные данные боя")
+        return ConversationHandler.END
+    
+    mob_id = parts[3]
+    mob_data = load_mobs().get("mobs", {}).get(mob_id, {})
+    
+    if not mob_data:
+        await query.edit_message_text("❌ Моб не найден")
+        return ConversationHandler.END
+    
+    # Initialize fight state
+    mob_hp = mob_data.get("hp", 30)
+    player_hp = player["hp"]
+    
+    player["active_encounter_fight"] = {
+        "mob_data": mob_data,
+        "current_player_hp": player_hp,
+        "current_mob_hp": mob_hp,
+        "rounds": [],
+        "player_debuffed": False,
+    }
+    save_player_data(player)
+    
+    # Build initial fight message
+    mob_name = mob_data.get("display_name", mob_id)
+    message = (
+        f"⚔️ <b>Начался бой!</b>\n\n"
+        f"Противник: {mob_name}\n"
+        f"❤️ Ваше HP: {player_hp}\n"
+        f"💀 HP врага: {mob_hp}\n\n"
+        f"Выберите действие:"
+    )
+    
+    keyboard = [
+        [InlineKeyboardButton("⚔️ Атака", callback_data="encounter_attack"), InlineKeyboardButton("🛡️ Блок", callback_data="encounter_block")],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await query.edit_message_text(
+        text=message,
+        reply_markup=reply_markup,
+        parse_mode="HTML"
+    )
+    
+    return WAITING_FOR_PLAYER_ACTION
+
+
+async def _show_fight_details_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Callback to show detailed fight breakdown."""
+    query = update.callback_query
+    await query.answer()
+    
+    # Parse callback data: adventure_fight_details_{user_id}_{loc_id}
+    parts = query.data.split("_")
+    if len(parts) < 5:
+        await query.edit_message_text("❌ Неверные данные боя")
         return
-
-
-def calculate_expedition_result(user_id: int, loc_id: str, username: str) -> tuple:
-    """Calculate and return expedition result. Used by expiration checker."""
+    
+    user_id = int(parts[3])
+    loc_id = parts[4]
+    
+    # Check if user requesting their own fight details
+    if query.from_user.id != user_id:
+        await query.edit_message_text("❌ Это не ваши детали боя")
+        return
+    
+    # Get fight details from player data
+    player = get_player(user_id)
+    fight_details = player.get("last_fight_details")
+    
+    if not fight_details:
+        await query.edit_message_text("❌ Детали боя не найдены")
+        return
+    
+    # Get location name
     locations = load_locations()
     loc = locations.get(loc_id, {})
-    mobs_data = load_mobs()
-    pool = load_global_pool()
+    loc_name = loc.get("name", loc_id)
     
-    player = get_player(user_id)
-    current_hp = player.get("hp", 200)
-    max_hp = player.get("max_hp", 200)
+    # Build details message
+    mob_name = fight_details.get("mob_name", "Неизвестный")
+    encounter_result = fight_details.get("encounter_result")
+    rounds = fight_details.get("rounds", [])
     
-    # Roll resources from location
-    resources_data = loc.get("resources", [])
-    resources = []
-    for resource in resources_data:
-        chance = resource.get("chance", 0)
-        if random.random() < chance:
-            resources.append({"name": resource.get("name", resource.get("id", "Unknown")), "quantity": 1})
+    result_text = {
+        "victory": "🎉 <b>ПОБЕДА!</b> Вы одолели противника.",
+        "defeat": "💀 <b>ПОРАЖЕНИЕ</b> Противник оказался сильнее.",
+        "mob_escaped": "🏃 <b>НИЧЬЯ!</b> Противник скрылся."
+    }.get(encounter_result, "Бой завершён")
     
-    # 50% chance for encounter during expedition
-    has_encounter = random.random() < 0.5
-    encounter_result = None
-    encounter_mob_name = None
-    encounter_hp_left = current_hp
-    xp_gained = 0
-    hp_healed = 0
-    
-    if has_encounter:
-        mob, mob_desc_key = _select_encounter_mob(loc_id, mobs_data, locations)
-        mob_description = None
-        mob_name_text = None
-        if mob_desc_key:
-            mob_description = _get_text(f"adventure.{mob_desc_key}")
-            mob_name_text = _get_text(f"adventure.{mob_desc_key.replace('_desc', '_name')}")
-        
-        if mob:
-            # Start fight
-            fight_result = _resolve_encounter_fight(current_hp, max_hp, mob)
-            encounter_result = fight_result["encounter_result"]
-            encounter_mob_name = mob_name_text if mob_name_text else mob.get("name", "Неизвестный моб")
-            encounter_hp_left = fight_result["player_hp_left"]
-            
-            if fight_result["winner"] == "player":
-                xp_gained += 10
-                hp_healed = min(20, max_hp - encounter_hp_left)
-                encounter_hp_left += hp_healed
-            else:
-                encounter_hp_left = max(1, encounter_hp_left - 5)
-    
-    # Update player stats
-    new_hp = min(max_hp, encounter_hp_left)
-    update_player(
-        user_id,
-        hp=new_hp,
-        xp=player.get("xp", 0) + xp_gained,
-        active_expedition=None,
-        total_expeditions=player.get("total_expeditions", 0) + 1,
-    )
-    
-    # Save resources to player inventory
-    if resources:
-        inventory = player.get("inventory", [])
-        for res in resources:
-            inventory.append(res)
-        update_player(user_id, inventory=inventory)
-    
-    # Build result message using texts from adventure.yaml
-    result_lines = []
-    
-    # Resources
-    if resources:
-        res_list = "\n".join([_format_resource(r) for r in resources])
-        result_lines.append(_get_text("adventure.expedition_resources", resources=res_list))
-    else:
-        result_lines.append(_get_text("adventure.expedition_no_resources"))
-    
-    # Encounter summary
-    encounters_summary = []
-    encounter_message = None
-    if has_encounter and encounter_mob_name:
-        if encounter_result == "victory":
-            encounters_summary.append(_get_text("adventure.mob_killed", mob_name=encounter_mob_name))
-            if xp_gained > 0:
-                encounters_summary.append(_get_text("adventure.reward_xp", xp=xp_gained))
-            if hp_healed > 0:
-                encounters_summary.append(f"❤️‍🩹 +{hp_healed} HP")
-        elif encounter_result == "defeat":
-            encounters_summary.append(_get_text("adventure.mob_survived", mob_name=encounter_mob_name))
-            encounter_message = _get_text("adventure.expedition_result_failure")
-        else:
-            encounters_summary.append(_get_text("adventure.mob_survived", mob_name=encounter_mob_name))
-    
-    # Determine expedition result status
-    if encounter_result == "defeat":
-        result_status = _get_text("adventure.expedition_result_fail")
-    elif encounter_result == "victory" and resources:
-        result_status = _get_text("adventure.expedition_result_success")
-    elif resources:
-        result_status = _get_text("adventure.expedition_result_success")
-    else:
-        result_status = _get_text("adventure.expedition_result_failure")
-    
-    # Build final summary text
-    summary_lines = [
-        _get_text("adventure.expedition_final_summary",
-            username=username,
-            hp=new_hp,
-            max_hp=max_hp,
-            total_xp=xp_gained,
-            resources_summary="\n".join(result_lines),
-            encounters_summary="\n".join(encounters_summary) if encounters_summary else ""
-        )
+    lines = [
+        f"⚔️ <b>Детали боя</b>",
+        f"",
+        f"📍 Локация: {loc_name}",
+        f"⚔️ Противник: {mob_name}",
+        f"",
+        f"{result_text}",
+        f"",
     ]
     
-    return "\n".join(summary_lines)
-
-
-async def send_expedition_result(user_id: int, loc_id: str, username: str, context: ContextTypes.DEFAULT_TYPE, chat_id: int | None = None) -> None:
-    """Called when expedition timer expires. Used by expiration checker and job_queue.
-    
-    When called from job_queue.run, the function receives context with job data.
-    When called from expiration checker, parameters are passed directly.
-    """
-    # Handle job_queue callback case
-    if context and hasattr(context, 'job') and context.job and context.job.data:
-        job_data = context.job.data
-        user_id = job_data.get("user_id", user_id)
-        loc_id = job_data.get("loc_id", loc_id)
-        username = job_data.get("username", "Гном")
-        chat_id = job_data.get("chat_id")  # Get chat_id from job data
-    
-    locations = load_locations()
-    loc = locations.get(loc_id, {})
-    mobs_data = load_mobs()
-    pool = load_global_pool()
-    
-    player = get_player(user_id)
-    current_hp = player.get("hp", 200)
-    max_hp = player.get("max_hp", 200)
-    
-    # Roll resources from location
-    resources_data = loc.get("resources", [])
-    resources = []
-    for resource in resources_data:
-        chance = resource.get("chance", 0)
-        if random.random() < chance:
-            resources.append({"name": resource.get("name", resource.get("id", "Unknown")), "quantity": 1})
-    
-    # 50% chance for encounter during expedition
-    has_encounter = random.random() < 0.5
-    encounter_result = None
-    encounter_mob_name = None
-    encounter_hp_left = current_hp
-    xp_gained = 0
-    hp_healed = 0
-    
-    if has_encounter:
-        mob, mob_desc_key = _select_encounter_mob(loc_id, mobs_data, locations)
-        mob_description = None
-        mob_name_text = None
-        if mob_desc_key:
-            mob_description = _get_text(f"adventure.{mob_desc_key}")
-            mob_name_text = _get_text(f"adventure.{mob_desc_key.replace('_desc', '_name')}")
+    for rnd in rounds:
+        player_hp = rnd.get("player_hp", 0)
+        mob_hp = rnd.get("mob_hp", 0)
+        player_dmg = rnd.get("player_dmg", 0)
         
-        if mob:
-            # Start fight
-            fight_result = _resolve_encounter_fight(current_hp, max_hp, mob)
-            encounter_result = fight_result["encounter_result"]
-            # Use mob_name_text if available (for specific mobs), otherwise use mob["name"]
-            encounter_mob_name = mob_name_text if mob_name_text else mob.get("name", "Неизвестный моб")
-            encounter_hp_left = fight_result["player_hp_left"]
-            
-            if fight_result["winner"] == "player":
-                # Victory rewards
-                xp_gained += 10
-                hp_healed = min(20, max_hp - encounter_hp_left)
-                encounter_hp_left += hp_healed
-            else:
-                # Defeat - additional HP loss
-                encounter_hp_left = max(1, encounter_hp_left - 5)
+        player_action = rnd.get("player_action", "block")
+        action_text = "🛡️ Блок" if player_action == "block" else f"⚔️ Атака ({player_dmg} урона)"
+        
+        stun_text = " ⚡Ошеломлен!" if rnd.get("player_stunned") else ""
+        
+        lines.append(f"  Ход {rnd['round']}: {action_text}{stun_text}")
+        lines.append(f"  Ваш HP: {player_hp}, HP врага: {mob_hp}")
     
-    # Update player stats
-    new_hp = min(max_hp, encounter_hp_left)
-    update_player(
-        user_id,
-        hp=new_hp,
-        xp=player.get("xp", 0) + xp_gained,
-        active_expedition=None,
-        total_expeditions=player.get("total_expeditions", 0) + 1,
+    lines.append("")
+    lines.append("🔄 Нажмите кнопку ниже для возврата")
+    
+    keyboard = [
+        [InlineKeyboardButton("📍 К локациям", callback_data="adventure_locations")],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await query.edit_message_text(
+        text="\n".join(lines),
+        reply_markup=reply_markup,
+        parse_mode="HTML"
     )
-    
-    # Save resources to player inventory
-    if resources:
-        inventory = player.get("inventory", [])
-        for res in resources:
-            inventory.append(res)
-        update_player(user_id, inventory=inventory)
-    
-    # Build result message using texts from adventure.yaml
-    result_lines = []
-    
-    # Resources
-    if resources:
-        res_list = "\n".join([_format_resource(r) for r in resources])
-        result_lines.append(_get_text("adventure.expedition_resources", resources=res_list))
-    else:
-        result_lines.append(_get_text("adventure.expedition_no_resources"))
-    
-    # Encounter summary
-    encounters_summary = []
-    encounter_message = None
-    if has_encounter and encounter_mob_name:
-        if encounter_result == "victory":
-            encounters_summary.append(_get_text("adventure.mob_killed", mob_name=encounter_mob_name))
-            if xp_gained > 0:
-                encounters_summary.append(_get_text("adventure.reward_xp", xp=xp_gained))
-            if hp_healed > 0:
-                encounters_summary.append(f"❤️‍🩹 +{hp_healed} HP")
-        elif encounter_result == "defeat":
-            encounters_summary.append(_get_text("adventure.mob_survived", mob_name=encounter_mob_name))
-            encounter_message = _get_text("adventure.expedition_result_failure")
-        else:
-            encounters_summary.append(_get_text("adventure.mob_survived", mob_name=encounter_mob_name))
-    
-    # Determine expedition result status
-    if encounter_result == "defeat":
-        result_status = _get_text("adventure.expedition_result_fail")
-    elif encounter_result == "victory" and resources:
-        result_status = _get_text("adventure.expedition_result_success")
-    elif resources:
-        result_status = _get_text("adventure.expedition_result_success")
-    else:
-        result_status = _get_text("adventure.expedition_result_failure")
-    
-    # Build final summary text
-    summary_lines = [
-        _get_text("adventure.expedition_final_summary",
-            username=username,
-            hp=new_hp,
-            max_hp=max_hp,
-            total_xp=xp_gained,
-            resources_summary="\n".join(result_lines),
-            encounters_summary="\n".join(encounters_summary) if encounters_summary else ""
-        )
+
+
+def _format_fight_details(fight_result: dict, mob_data: dict) -> str:
+    """Format detailed fight breakdown for display."""
+    lines = [
+        f"⚔️ <b>Детали боя</b>",
+        f"",
+        f"👤 <b>Вы</b> vs {mob_data.get('name', 'Врагом')}",
+        f"",
     ]
     
-    # Send completion message to the chat where expedition was started
-    target_chat_id = chat_id if chat_id else user_id
-    try:
-        await context.bot.send_message(
-            chat_id=target_chat_id,
-            text="\n".join(summary_lines),
-            parse_mode='HTML'
-        )
-    except Exception as e:
-        logger.error(f"Error sending expedition completion to chat {target_chat_id}: {e}")
+    for rnd in fight_result["rounds"]:
+        player_hp = rnd.get("player_hp", 0)
+        mob_hp = rnd.get("mob_hp", 0)
+        player_dmg = rnd.get("player_dmg", 0)
+        mob_dmg = rnd.get("mob_dmg", 0)
+        
+        player_action = rnd.get("player_action", "block")
+        action_text = "🛡️ Блок" if player_action == "block" else f"⚔️ Атака ({player_dmg} урона)"
+        
+        stun_text = " (⚡ Ошеломлен!)" if rnd.get("player_stunned") else ""
+        crit_text = " (💥 КРИТ!)" if rnd.get("mob_crit") else ""
+        
+        lines.append(f"  Ход {rnd['round']}: {action_text}{stun_text}")
+        lines.append(f"  Ваш HP: {player_hp}, HP врага: {mob_hp}{crit_text}")
+        lines.append("")
+    
+    winner = fight_result["winner"]
+    if winner == "player":
+        lines.append("🎉 <b>Победа!</b> Вы одолели противника.")
+    elif winner == "mob":
+        lines.append("💀 <b>Поражение</b> Противник оказался сильнее.")
+    else:
+        lines.append("🏃 <b>Ничья!</b> Противник скрылся.")
+    
+    return "\n".join(lines)
+
+
+def register_adventure_handlers(application) -> None:
+    """Register adventure handlers with the application."""
+    application.add_handler(CallbackQueryHandler(start_expedition_callback, pattern=r"^adventure_start_"))
+    application.add_handler(CallbackQueryHandler(_cancel_expedition_callback, pattern="adventure_cancel_expedition"))
+    application.add_handler(CallbackQueryHandler(_handle_encounter_fight_callback, pattern=r"^encounter_"))
+    application.add_handler(CallbackQueryHandler(_show_fight_details_callback, pattern=r"^adventure_fight_details_"))
+    
+    # Register interactive encounter fight conversation handler
+    encounter_fight_handler = ConversationHandler(
+        entry_points=[CallbackQueryHandler(start_interactive_encounter_fight, pattern=r"^encounter_start_")],
+        states={
+            WAITING_FOR_PLAYER_ACTION: [CallbackQueryHandler(_handle_encounter_fight_callback, pattern=r"^encounter_")],
+        },
+        fallbacks=[CallbackQueryHandler(_show_fight_details_callback, pattern=r"^adventure_fight_details_")],
+    )
+    application.add_handler(encounter_fight_handler)
