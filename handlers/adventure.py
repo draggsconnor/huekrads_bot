@@ -443,23 +443,23 @@ async def _start_interactive_expedition_encounter(user_id: int, mob_id: str, mob
     
     Creates a new message with fight interface if chat_id is provided.
     """
-    # Get mob full data
+    # Get mob full data from specific_mobs by loc_id
     mobs_full = load_mobs()
-    mob_full = mobs_full.get("specific_mobs", {}).get(loc_id, [])
+    specific_mobs_list = mobs_full.get("specific_mobs", {}).get(loc_id, [])
     mob_def = None
-    for m in mob_full:
+    for m in specific_mobs_list:
         if m.get("id") == mob_id:
             mob_def = m
             break
     
     if not mob_def:
-        # Fallback to mob_data
+        # Fallback to mob_data if specific mob not found
         mob_def = mob_data
     
     mob_hp = mob_def.get("hp", 30)
     player = get_player(user_id)
     player_hp = player.get("hp", 200)
-    mob_name = mob_def.get("name", "Враг")
+    mob_name = mob_def.get("name", mob_id)
     
     # Initialize fight state
     player["active_encounter_fight"] = {
@@ -1157,3 +1157,4 @@ async def adventure_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 # Export for bot.py import
 adventure_command = adventure_handler
+adventure_callback = adventure_handler
