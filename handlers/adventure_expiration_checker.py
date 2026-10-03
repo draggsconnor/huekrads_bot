@@ -52,6 +52,8 @@ async def expedition_expiration_job(context: ContextTypes.DEFAULT_TYPE) -> None:
                     logger.info(f"Expedition completed for user {user_id}")
                 except Exception as e:
                     logger.error(f"Error sending expedition result for user {user_id}: {e}")
+                    # Even if sending fails, still clear the expedition to prevent stuck state
+                    player["active_expedition"] = None
         
         save_player_data(player_data)
         

@@ -551,11 +551,12 @@ async def adventure_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 elapsed = (now - start_dt).total_seconds()
                 remaining = max(0, total_duration - elapsed)
                 remaining_minutes = int(remaining / 60)
+                remaining_seconds = int(remaining) % 60
                 
                 expedition_info = {
                     "location": exp_loc_name,
                     "remaining_minutes": remaining_minutes,
-                    "remaining_seconds": int(remaining)
+                    "remaining_seconds": remaining_seconds
                 }
 
         # Get boss chance and name from first boss in bosses list
@@ -761,7 +762,7 @@ async def adventure_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         )
         
         # Schedule completion message
-        await context.job_queue.run(
+        await context.job_queue.run_once(
             _expedition_complete_callback,
             duration_seconds,
             data={"user_id": user.id, "loc_id": loc_id, "username": user.username or user.first_name}
