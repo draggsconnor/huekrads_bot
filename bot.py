@@ -100,6 +100,8 @@ from handlers.dig import dig_command
 from handlers.adventure import (
     adventure_command,
     adventure_callback,
+    adventure_stats_command,
+    adventure_inventory_command,
 )
 from handlers.huecrab import (
     huecrab_event_job,
@@ -141,6 +143,8 @@ BOT_COMMANDS = [
     BotCommand("boss", get_text("menu.commands.boss")),
     BotCommand("boss_reg", get_text("menu.commands.boss_reg")),
     BotCommand("adventure", get_text("menu.commands.adventure")),
+    BotCommand("adventure_stats", get_text("menu.commands.adventure_stats")),
+    BotCommand("adventure_inventory", get_text("menu.commands.adventure_inventory")),
 ]
 
 
@@ -400,6 +404,8 @@ async def main():
     application.add_handler(CommandHandler("ball", ball_command))
 
     application.add_handler(CommandHandler("adventure", adventure_command))
+    application.add_handler(CommandHandler("adventure_stats", adventure_stats_command))
+    application.add_handler(CommandHandler("adventure_inventory", adventure_inventory_command))
 
     application.add_handler(
         CallbackQueryHandler(

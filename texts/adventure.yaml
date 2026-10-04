@@ -71,24 +71,7 @@ result: |
   Опыт: +{xp}
   Золото: +{gold}
 
-# Menu references (used from menu.yaml)
-adventure_menu: |
-  🗺️ <b>Приключения</b>
-  Отправляйтесь в опасные локации и сражайтесь с боссами!
-  
-  Доступные команды:
-  • /adventure - Выбрать локацию
-  • /adventure_stats - Ваша статистика
-adventure_stats: |
-  📊 <b>Статистика приключений</b>
-  
-  Локации пройдено: {locations}
-  Боссов повержено: {bosses}
-  Золота добыто: {gold}
-  Всего опыта: {xp}
-
-# Error handling
-error: "Произошла ошибка. Попробуйте снова."
+#
 timeout: "Время вышло. Команда отменена."
 busy: "Вы уже в приключении. Дождитесь окончания."
 
@@ -190,7 +173,6 @@ searching_boss: "🔍 Ищем боссов..."
 preparing_combat: "⚔️ Подготовка к бою..."
 
 # Validation
-must_be_online: "Вы должны быть онлайн для приключений."
 # Expedition (远征)
 expedition_start: |
   ⏳ <b>{username}</b> отправился в экспедицию в {location_name}.
@@ -324,15 +306,27 @@ resources_loot: |
 
 resource_loot_item: "{emoji} {name}: {quantity} шт. {description}"
 
-# Expedition early return
-expedition_cancel: |
-  ⏪ <b>Возврат из экспедиции</b>
-  
-  {username} досрочно вернулся из экспедиции в {location_name}.
-  
-expedition_cancel_confirm: "⏪ Вернуть из экспедиции досрочно"
-expedition_cancelled: |
-  ⏪ <b>Экспедиция прервана</b>
-  
-  {username} досрочно вернулся из экспедиции.
-  {result_message}
+# Cancel
+expedition_cancel: "❌ Отменить экспедицию?"
+expedition_cancelled: "🚫 Экспедиция отменена."
+no_active_expedition: "❌ У вас нет активной экспедиции."
+
+# Inventory
+adventure_inventory_title: "🎒 <b>Инвентарь экспедиций</b>"
+adventure_inventory_no_items: "Пусто..."
+adventure_inventory_item: "• {name}: {count} шт."
+
+# Stats
+adventure_stats_title: "📊 <b>Статистика экспедиций</b>"
+adventure_stats_no_data: "Вы ещё не завершили ни одной экспедиции."
+adventure_stats_level: "⭐ Уровень: {level}"
+adventure_stats_hp: "❤️ HP: {current}/{max}"
+adventure_stats_gold: "💰 Золото: {gold}"
+adventure_stats_xp: "⭐ Опыт: {xp}"
+adventure_stats_expeditions: "🏁 Экспедиций: {count}"
+adventure_stats_expeditions_success: "  ✅ Успешных: {success}"
+adventure_stats_expeditions_failed: "  ⚠️ С потерями: {failed}"
+adventure_stats_expeditions_fail: "  💀 Проваленных: {failed}"
+adventure_stats_inventory_title: "🎒 Предметы:"
+adventure_stats_no_inventory: "Нет предметов"
+adventure_stats_inventory_item: "  • {name}: {count} шт."

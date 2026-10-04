@@ -18,3 +18,5 @@ commands:
   boss: Запустить босса
   boss_reg: Записаться на босса
   adventure: Приключения в мире гномов
+  adventure_stats: Статистика приключений
+  adventure_inventory: Инвентарь экспедиций

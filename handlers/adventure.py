@@ -16,7 +16,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import ContextTypes
+from telegram.ext import ContextTypes, CommandHandler
+from telegram.constants import ParseMode
 
 from text_resources import get_text
 
@@ -944,6 +945,98 @@ def calculate_expedition_result(user_id: int, loc_id: str, username: str) -> tup
     ]
     
     return "\n".join(summary_lines)
+
+
+async def adventure_stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /adventure_stats command - show player stats."""
+    user = update.effective_user
+    if not user:
+        return
+    
+    player = get_player(user.id)
+    
+    # Get stats
+    level = player.get("lvl", 1)
+    current_hp = player.get("hp", 200)
+    max_hp = player.get("max_hp", 200)
+    gold = player.get("gold", 0)
+    xp = player.get("xp", 0)
+    total_expeditions = player.get("total_expeditions", 0)
+    inventory = player.get("inventory", [])
+    
+    # Calculate expedition success/fail counts (using total_fights for now as proxy)
+    total_fights = player.get("total_fights", 0)
+    wins = player.get("wins", 0)
+    failed = total_fights - wins
+    
+    # Build stats message
+    stats_lines = [
+        _get_text("adventure.adventure_stats_title"),
+        "",
+        _get_text("adventure.adventure_stats_level", level=level),
+        _get_text("adventure.adventure_stats_hp", current=current_hp, max=max_hp),
+        _get_text("adventure.adventure_stats_gold", gold=gold),
+        _get_text("adventure.adventure_stats_xp", xp=xp),
+        _get_text("adventure.adventure_stats_expeditions", count=total_expeditions),
+        _get_text("adventure.adventure_stats_expeditions_success", success=wins),
+    ]
+    
+    if failed > 0:
+        stats_lines.append(_get_text("adventure.adventure_stats_expeditions_failed", failed=failed))
+    
+    # Inventory section
+    stats_lines.append("")
+    stats_lines.append(_get_text("adventure.adventure_stats_inventory_title"))
+    
+    if inventory:
+        # Group inventory items by name
+        inventory_counts = {}
+        for item in inventory:
+            item_name = item.get("name", "Unknown")
+            inventory_counts[item_name] = inventory_counts.get(item_name, 0) + 1
+        
+        for item_name, count in sorted(inventory_counts.items()):
+            stats_lines.append(_get_text("adventure.adventure_stats_inventory_item", name=item_name, count=count))
+    else:
+        stats_lines.append(_get_text("adventure.adventure_stats_no_inventory"))
+    
+    await update.effective_message.reply_text(
+        "\n".join(stats_lines),
+        parse_mode=ParseMode.HTML
+    )
+
+
+async def adventure_inventory_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /adventure_inventory command - show player inventory."""
+    user = update.effective_user
+    if not user:
+        return
+    
+    player = get_player(user.id)
+    inventory = player.get("inventory", [])
+    
+    # Build inventory message
+    inventory_lines = [
+        _get_text("adventure.adventure_inventory_title"),
+        ""
+    ]
+    
+    if inventory:
+        # Group inventory items by name
+        inventory_counts = {}
+        for item in inventory:
+            item_name = item.get("name", "Unknown")
+            inventory_counts[item_name] = inventory_counts.get(item_name, 0) + 1
+        
+        for item_name, count in sorted(inventory_counts.items()):
+            inventory_lines.append(_get_text("adventure.adventure_inventory_item", name=item_name, count=count))
+    else:
+        inventory_lines.append(_get_text("adventure.adventure_inventory_no_items"))
+    
+    await update.effective_message.reply_text(
+        "\n".join(inventory_lines),
+        parse_mode=ParseMode.HTML
+    )
 
 
 async def send_expedition_result(user_id: int, loc_id: str, username: str, context: ContextTypes.DEFAULT_TYPE, chat_id: int | None = None) -> None:
