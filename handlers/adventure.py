@@ -804,8 +804,8 @@ def calculate_expedition_result(user_id: int, loc_id: str, username: str) -> tup
         if random.random() < chance:
             resources.append({"name": resource.get("name", resource.get("id", "Unknown")), "quantity": 1})
     
-    # 50% chance for encounter during expedition
-    has_encounter = random.random() < 0.5
+    # 99% chance for encounter during expedition
+    has_encounter = random.random() < 0.99
     encounter_result = None
     encounter_mob_name = None
     encounter_hp_left = current_hp
@@ -933,8 +933,8 @@ async def send_expedition_result(user_id: int, loc_id: str, username: str, conte
         if random.random() < chance:
             resources.append({"name": resource.get("name", resource.get("id", "Unknown")), "quantity": 1})
     
-    # 50% chance for encounter during expedition
-    has_encounter = random.random() < 0.5
+    # 99% chance for encounter during expedition
+    has_encounter = random.random() < 0.99
     encounter_result = None
     encounter_mob_name = None
     encounter_hp_left = current_hp
