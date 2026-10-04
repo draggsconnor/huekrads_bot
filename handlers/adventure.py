@@ -391,6 +391,50 @@ def _get_text(key: str, **kwargs) -> str:
         return key
 
 
+def _get_mob_gender(mob_name: str) -> int:
+    """Определяет род моба по его имени для правильного склонения глаголов.
+    
+    Returns: 1 = мужской, 2 = женский, 3 = средний
+    """
+    # Сначала проверяем известные мобы с явными названиями
+    # Если моб имеет название с определённым родом
+    
+    # ЖЕНЫСКИЙ РОД (окончания -а, -я)
+    if any(mob_name.lower().endswith(suf) for suf in ['а', 'я']):
+        # Исключения: имена существительные мужского рода на -а, -я
+        male_exceptions = ['папа', 'дядя', 'юннга', 'кочерга']
+        if mob_name.lower() not in male_exceptions:
+            return 2
+    
+    # СРЕДНИЙ РОД (окончания -о, -е, -мя, -и, -ь после шипящих)
+    if any(mob_name.lower().endswith(suf) for suf in ['о', 'е', 'мя', 'и', 'у']):
+        return 3
+    if mob_name.lower().endswith('ь') and mob_name.lower()[-2] in ['ш', 'ч', 'щ', 'ж']:
+        return 3
+    
+    # МУЖСКОЙ РОД (остальные случаи, окончания согласная, -ь)
+    return 1
+
+
+def _get_mob_gendered_text(mob_name: str, text_key_base: str) -> str:
+    """Получает текст с правильным родом для моба.
+    
+    Args:
+        mob_name: Имя моба
+        text_key_base: Базовый ключ текста (например 'mob_survived')
+    
+    Returns:
+        Текст с правильным родом
+    """
+    gender = _get_mob_gender(mob_name)
+    if gender == 2:
+        return _get_text(f"adventure.{text_key_base}_f", mob_name=mob_name)
+    elif gender == 3:
+        return _get_text(f"adventure.{text_key_base}_n", mob_name=mob_name)
+    else:
+        return _get_text(f"adventure.{text_key_base}", mob_name=mob_name)
+
+
 async def _expedition_complete_callback(context: ContextTypes.DEFAULT_TYPE) -> None:
     """Callback function for job_queue when expedition completes.
     
@@ -866,16 +910,16 @@ def calculate_expedition_result(user_id: int, loc_id: str, username: str) -> tup
     encounter_message = None
     if has_encounter and encounter_mob_name:
         if encounter_result == "victory":
-            encounters_summary.append(_get_text("adventure.mob_killed", mob_name=encounter_mob_name))
+            encounters_summary.append(_get_mob_gendered_text(encounter_mob_name, "mob_killed"))
             if xp_gained > 0:
                 encounters_summary.append(_get_text("adventure.reward_xp", xp=xp_gained))
             if hp_healed > 0:
                 encounters_summary.append(f"❤️‍🩹 +{hp_healed} HP")
         elif encounter_result == "defeat":
-            encounters_summary.append(_get_text("adventure.mob_survived", mob_name=encounter_mob_name))
+            encounters_summary.append(_get_mob_gendered_text(encounter_mob_name, "mob_survived"))
             encounter_message = _get_text("adventure.expedition_result_failure")
         else:
-            encounters_summary.append(_get_text("adventure.mob_survived", mob_name=encounter_mob_name))
+            encounters_summary.append(_get_mob_gendered_text(encounter_mob_name, "mob_survived"))
     
     # Determine expedition result status
     if encounter_result == "defeat":
@@ -998,16 +1042,16 @@ async def send_expedition_result(user_id: int, loc_id: str, username: str, conte
     encounter_message = None
     if has_encounter and encounter_mob_name:
         if encounter_result == "victory":
-            encounters_summary.append(_get_text("adventure.mob_killed", mob_name=encounter_mob_name))
+            encounters_summary.append(_get_mob_gendered_text(encounter_mob_name, "mob_killed"))
             if xp_gained > 0:
                 encounters_summary.append(_get_text("adventure.reward_xp", xp=xp_gained))
             if hp_healed > 0:
                 encounters_summary.append(f"❤️‍🩹 +{hp_healed} HP")
         elif encounter_result == "defeat":
-            encounters_summary.append(_get_text("adventure.mob_survived", mob_name=encounter_mob_name))
+            encounters_summary.append(_get_mob_gendered_text(encounter_mob_name, "mob_survived"))
             encounter_message = _get_text("adventure.expedition_result_failure")
         else:
-            encounters_summary.append(_get_text("adventure.mob_survived", mob_name=encounter_mob_name))
+            encounters_summary.append(_get_mob_gendered_text(encounter_mob_name, "mob_survived"))
     
     # Determine expedition result status
     if encounter_result == "defeat":

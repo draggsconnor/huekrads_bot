@@ -254,7 +254,11 @@ expedition_final_summary: |
 resources_list_item: "• {name}: {quantity} шт."
 encounters_count: "• Боев: {count}"
 mob_killed: "  • {mob_name} повержен"
+mob_killed_f: "  • {mob_name} побеждена"
+mob_killed_n: "  • {mob_name} побеждено"
 mob_survived: "  • {mob_name} убежал"
+mob_survived_f: "  • {mob_name} убежала"
+mob_survived_n: "  • {mob_name} убежало"
 
 mob_description: |
   <i>{description}</i>
