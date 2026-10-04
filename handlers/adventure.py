@@ -747,7 +747,10 @@ async def adventure_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         
         update_player(user.id, active_expedition=expedition_data)
         
-        # Delete the location message and send expedition start message
+        # Get the chat_id where the expedition was started
+        chat_id = query.message.chat_id if query.message else user.id
+        
+        # Delete the location message and send expedition start message to the same chat
         await query.delete_message()
         
         expedition_text = _get_text(
@@ -757,13 +760,12 @@ async def adventure_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             duration=duration_minutes
         )
         await context.bot.send_message(
-            chat_id=user.id,
+            chat_id=chat_id,
             text=expedition_text,
             parse_mode='HTML'
         )
         
         # Schedule completion message - save chat_id to send result to the same chat
-        chat_id = query.message.chat_id if query.message else user.id
         context.job_queue.run_once(
             _expedition_complete_callback,
             duration_seconds,
