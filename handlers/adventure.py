@@ -969,9 +969,13 @@ async def adventure_stats_command(update: Update, context: ContextTypes.DEFAULT_
     wins = player.get("wins", 0)
     failed = total_fights - wins
     
+    # Get username for display
+    username = user.username or user.first_name or "Гном"
+    
     # Build stats message
     stats_lines = [
         _get_text("adventure.adventure_stats_title"),
+        f"👤 <b>{username}</b>",
         "",
         _get_text("adventure.adventure_stats_level", level=level),
         _get_text("adventure.adventure_stats_hp", current=current_hp, max=max_hp),
