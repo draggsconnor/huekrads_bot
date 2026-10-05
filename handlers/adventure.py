@@ -984,22 +984,6 @@ async def adventure_stats_command(update: Update, context: ContextTypes.DEFAULT_
     if failed > 0:
         stats_lines.append(_get_text("adventure.adventure_stats_expeditions_failed", failed=failed))
     
-    # Inventory section
-    stats_lines.append("")
-    stats_lines.append(_get_text("adventure.adventure_stats_inventory_title"))
-    
-    if inventory:
-        # Group inventory items by name
-        inventory_counts = {}
-        for item in inventory:
-            item_name = item.get("name", "Unknown")
-            inventory_counts[item_name] = inventory_counts.get(item_name, 0) + 1
-        
-        for item_name, count in sorted(inventory_counts.items()):
-            stats_lines.append(_get_text("adventure.adventure_stats_inventory_item", name=item_name, count=count))
-    else:
-        stats_lines.append(_get_text("adventure.adventure_stats_no_inventory"))
-    
     await update.effective_message.reply_text(
         "\n".join(stats_lines),
         parse_mode=ParseMode.HTML
