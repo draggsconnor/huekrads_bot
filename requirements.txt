@@ -1,2 +1,11 @@
+<<<<<<< HEAD
 python-telegram-bot>=21.0
 APScheduler>=3.10.0
+=======
+python-telegram-bot[job-queue]>=20.0
+python-dotenv
+pytz
+nest-asyncio
+requests
+PyYAML
+>>>>>>> bd0593c31f44d624d955bae7c70ac12d81e7bf08

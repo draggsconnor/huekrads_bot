@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 .env
 __pycache__/
 *.pyc
@@ -6,3 +7,22 @@ __pycache__/
 venv/
 *.log
 data/
+=======
+# Секреты и конфиги
+.env
+
+# База данных
+*.db
+bot_database.db
+
+# Экспорт истории чата
+data/result.json
+
+# Python кэш
+__pycache__/
+*.py[cod]
+
+# Окружение
+venv/
+.venv/
+>>>>>>> bd0593c31f44d624d955bae7c70ac12d81e7bf08

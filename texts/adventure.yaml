@@ -1,0 +1,332 @@
+welcome: |
+  🗺️ <b>Доступные локации</b>
+  Выберите, куда отправитесь:
+
+# Detailed location info
+location_detailed_info: |
+  {username} стоит на входе в {location_emoji}{location_name}
+  {location_description}
+  Уровень: {min_level}+
+  Время: {duration} мин
+  Награды: {rewards}
+  Босс: {boss_name} ({boss_chance}%)
+
+cancel: "❌ Отмена"
+cancelled: "Отменено."
+unknown: "Неизвестная команда. Попробуйте снова."
+no_bosses: "В этой локации пока нет боссов."
+
+cooldown: |
+  ⏳ Вы недавно сражались.
+  Подождите ещё {minutes} мин.
+
+not_enough_gold: |
+  💰 Недостаточно золота.
+  Требуется: {price}
+
+low_hp_warning: |
+  ⚠️ У вас мало здоровья: {hp} HP!
+
+confirm_fight: |
+  ⚔️ <b>{boss_name}</b>
+  💰 Цена: {price}
+  ❤️ HP босса: {hp}
+  💣 Шанс крита: {crit}%
+
+  Начать бой?
+
+victory: |
+  🏆 <b>Победа!</b>
+  Повержен: {boss_name}
+  Раундов: {rounds}
+  ❤️ Ваше HP: {hp_left}
+
+  🎒 Лут:
+  {loot}
+
+  ⭐ Опыт: +{xp}
+
+defeat: |
+  💀 <b>Поражение...</b>
+  Вас одолел: {boss_name}
+  Раундов: {rounds}
+  ❤️ Ваше HP: {hp_left}
+
+already_full_hp: "❤️ У вас полное здоровье!"
+
+healed: |
+  ❤️‍🩹 Восстановлено полное здоровье!
+  💰 Потрачено: {cost} золота
+
+no_loot: "Ничего не найдено."
+
+low_level: |
+  🔒 Требуется уровень {level}
+  Прокачайтесь, чтобы открыть эту локацию.
+
+# Fallback / legacy keys
+result: |
+  🏆 <b>Результаты приключения</b> 🏆
+  Результат: {result}
+  Опыт: +{xp}
+  Золото: +{gold}
+
+#
+timeout: "Время вышло. Команда отменена."
+busy: "Вы уже в приключении. Дождитесь окончания."
+
+# Location selection
+select_location: "Выберите локацию для приключения"
+location_locked: |
+  🔒 <b>Локация закрыта</b>
+  Требуется уровень: {level}
+  
+  Прокачайтесь чтобы открыть доступ.
+
+# Boss selection
+select_boss: |
+  ⚔️ <b>Выберите босса</b>
+  
+  Доступные противники:
+
+boss_info: |
+  💀 <b>{name}</b>
+  ❤️ HP: {hp}
+  💣 Крит: {crit}%
+  💰 Цена: {price}
+
+# Combat
+combat_start: |
+  ⚔️ <b>Начался бой!</b>
+  
+  Противник: {boss_name}
+  Ваше HP: {hp}
+  
+  {round_info}
+
+combat_round: |
+  🔄 <b>Раунд {round}</b>
+  
+  {your_attack}
+  {boss_attack}
+  
+  ❤️ Ваше HP: {hp}
+  ❤️ Босс HP: {hp_boss}
+
+your_attack_hit: "✅ Ваш удар попал! {damage} урона"
+your_attack_miss: "❌ Ваш удар промахнулся!"
+your_attack_crit: "💣 КРИТИЧЕСКИЙ УДАР! {damage} урона!"
+
+boss_attack_hit: "⚔️ Босс ударил вас на {damage} урона"
+boss_attack_miss: "🛡️ Босс промахнулся!"
+boss_attack_crit: "💣 Босс КРИТИЧЕСКИ ударил! {damage} урона!"
+
+# Items and abilities
+use_item: "🎒 Использовать предмет: {item_name}"
+item_used: "✨ {item_name} активирован! {effect}"
+item_not_enough: "❌ Недостаточно такого предмета"
+item_not_found: "❌ Такой предмет не найден"
+
+heal_ability: "❤️‍🩹 Лечение: восстановить {amount} HP"
+heal_used: "✨ Здоровье восстановлено! +{healed} HP"
+heal_full: "✅ У вас полное здоровье"
+heal_not_enough_gold: "💰 Недостаточно золота для лечения"
+
+# Rewards
+reward_gold: "💰 Золото: +{gold}"
+reward_xp: "⭐ Опыт: +{xp}"
+reward_item: "🎒 Предмет: {item_name}"
+reward_item_rare: "🌟 РЕДКИЙ ПРЕДМЕТ: {item_name}!"
+
+# Levels
+level_up: |
+  ⭐ <b>НОВЫЙ УРОВЕНЬ!</b> ⭐
+  
+  Вы достигли уровня {level}!
+  Максимальное HP увеличено до {max_hp}
+  
+  🎉 Поздравляем!
+
+location_unlocked: |
+  🗺️ <b>Новая локация открыта!</b>
+  
+  Теперь доступна: {location_name}
+  
+  Отправляйтесь исследовать новые земли!
+
+# Special messages
+critical_defeat: |
+  💀 <b>Сокрушительное поражение!</b>
+  
+  Босс {boss_name} разгромил вас за {rounds} раундов!
+  HP осталось: {hp_left}
+
+close_call: |
+  🎉 <b>Победа в последний момент!</b>
+  
+  Осталось всего {hp_left} HP!
+  Но {boss_name} повержен!
+
+# State messages
+searching_location: "🔍 Ищем доступные локации..."
+searching_boss: "🔍 Ищем боссов..."
+preparing_combat: "⚔️ Подготовка к бою..."
+
+# Validation
+# Expedition (远征)
+expedition_start: |
+  ⏳ <b>{username}</b> отправился в экспедицию в {location_name}.
+  Экспедиция закончится через {duration} мин.
+
+expedition_completed: |
+  🏁 <b>Экспедиция завершена!</b>
+  
+  {location_name}
+  
+  {result_message}
+
+expedition_result_success: "✅ Экспедиция прошла успешно!"
+expedition_result_failure: "⚠️ Экспедиция завершена с трудом."
+expedition_result_fail: "💀 Экспедиция не удалась..."
+
+expedition_resources: |
+  🎒 <b>Добытые ресурсы:</b>
+  {resources}
+
+expedition_no_resources: "Ничего не добыто."
+
+expedition_encounter_start: |
+  ⚔️ <b>Энкаунтер!</b>
+  
+  {encounter_message}
+  
+  Начался бой!
+
+expedition_encounter_message: |
+  💥 Внезапная атака!
+  На вас напал {mob_name}!
+
+expedition_encounter_victory: |
+  🏆 Победа над {mob_name}!
+  
+  Получено:
+  • ❤️ Лечение: +{healed} HP
+  • ⭐ Опыт: +{xp}
+  {items}
+
+expedition_encounter_defeat: |
+  💀 Поражение от {mob_name}!
+  
+  Экспедиция завершена с потерями.
+
+expedition_boss_encounter: |
+  👑 <b>БОСС!</b>
+  
+  {encounter_message}
+
+expedition_final_summary: |
+  📊 <b>Итоги экспедиции</b>
+  
+  {username}
+  • ❤️ HP осталось: {hp}/{max_hp}
+  • ⭐ Опыт: +{total_xp}
+  {resources_summary}
+  {encounters_summary}
+
+resources_list_item: "• {name}: {quantity} шт."
+encounters_count: "• Боев: {count}"
+mob_killed: "  • {mob_name} повержен"
+mob_killed_f: "  • {mob_name} побеждена"
+mob_killed_n: "  • {mob_name} побеждено"
+mob_survived: "  • {mob_name} убежал"
+mob_survived_f: "  • {mob_name} убежала"
+mob_survived_n: "  • {mob_name} убежало"
+
+mob_description: |
+  <i>{description}</i>
+  
+  ❤️ HP: {hp}
+  📊 Уровень: {level}
+
+# Specific mobs for Dark Forest
+bush_with_requirements_name: "🌳Куст с предъявами"
+bush_with_requirements_desc: |
+  Просто куст. Но он шуршит так, что гном инстинктивно прикрывает пах. 
+  Из куста выглядывает пара красных глаз и слышится голос: «А ну покажи, что там у тебя, пездюк!». 
+  Если кусту не понравится размер — куст бьет веткой по рукам.
+  
+  <b>Тактика:</b> Низкий урон, но с шансом 30% вешает дебафф «Паранойя» (гном может пропустить ход, проверяя ширинку).
+  
+  ❤️ HP: 30
+  ⚔️ Урон: 5
+  📊 Уровень: 1
+
+head_on_spider_legs_name: "🕷️Голова деда на паучьих ногах"
+head_on_spider_legs_desc: |
+  Размером с таксу. У него морщинистое лицо, он постоянно что-то пиздит и пытается впиться жвалами в шею гнома.
+  
+  <b>Тактика:</b> Больно кусает. Если не убить за 3 хода — присасывается и высасывает дополнительно по 5 ХП каждый ход.
+  
+  ❤️ HP: 20
+  ⚔️ Урон: 8
+  📊 Уровень: 1
+
+# Special abilities
+ability_paranoida: |
+  <b>🌀 Паранойя</b>
+  Гном пропускает ход, проверяя ширинку
+  
+ability_suck: |
+  <b>🩸 Присасывание</b>
+  Моб присасывается и высасывает по 5 ХП каждый ход
+
+# Resources for Dark Forest
+resource_needle: "🌿 Хвоя"
+resource_needle_desc: "Обычная сосновая хвоя."
+
+resource_wood: "🪵 Древесина"
+resource_wood_desc: "Кусок гнилой доски. Можно сделать дубину или употребить как растопку."
+
+resource_pinecone: "🌰 Шишка"
+resource_pinecone_desc: "Шишка Хвойного Барона. Ещё пульсирует."
+
+resource_web: "🕸️ Паутина"
+resource_web_desc: "Липкая, вонючая, с останками мух. Крафт-материал."
+
+resource_pet_egg: "🥚 Яйцо питомца"
+resource_pet_egg_desc: "Из него может вылупиться что-то полезное."
+
+resource_boss_resin: "👑 Смола Барона"
+resource_boss_resin_desc: "Редкий ресурс. Используется для крафта брони."
+
+# Resources loot display
+resources_loot: |
+  🎒 <b>Ресурсы:</b>
+  {resources}
+
+resource_loot_item: "{emoji} {name}: {quantity} шт. {description}"
+
+# Cancel
+expedition_cancel: "❌ Отменить экспедицию?"
+expedition_cancelled: "🚫 Экспедиция отменена."
+no_active_expedition: "❌ У вас нет активной экспедиции."
+
+# Inventory
+adventure_inventory_title: "🎒 <b>Инвентарь экспедиций</b>"
+adventure_inventory_no_items: "Пусто..."
+adventure_inventory_item: "• {name}: {count} шт."
+
+# Stats
+adventure_stats_title: "📊 <b>Статистика экспедиций</b>"
+adventure_stats_no_data: "Вы ещё не завершили ни одной экспедиции."
+adventure_stats_level: "⭐ Уровень: {level}"
+adventure_stats_hp: "❤️ HP: {current}/{max}"
+adventure_stats_gold: "💰 Золото: {gold}"
+adventure_stats_xp: "⭐ Опыт: {xp}"
+adventure_stats_expeditions: "🏁 Экспедиций: {count}"
+adventure_stats_expeditions_success: "  ✅ Успешных: {success}"
+adventure_stats_expeditions_failed: "  ⚠️ С потерями: {failed}"
+adventure_stats_expeditions_fail: "  💀 Проваленных: {failed}"
+adventure_stats_inventory_title: "🎒 Предметы:"
+adventure_stats_no_inventory: "Нет предметов"
+adventure_stats_inventory_item: "  • {name}: {count} шт."
