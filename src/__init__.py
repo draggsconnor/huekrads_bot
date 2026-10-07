@@ -1,1 +1,1 @@
-# HueKrads bot package
+"""huekrads_bot package"""

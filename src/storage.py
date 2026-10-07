@@ -1,121 +1,54 @@
-# ==========================================
-# STORAGE — SQLite persistence layer
-# ==========================================
+"""Простое файловое хранилище игроков"""
 
 import json
-import sqlite3
-from pathlib import Path
+import os
 from typing import Optional
-
+from config import PLAYERS_FILE
 from models import Player
 
 
-DB_PATH = Path(__file__).with_name("huekrads.db")
+class Storage:
+    """Хранилище данных игроков в JSON"""
 
+    def __init__(self, filepath: str = PLAYERS_FILE):
+        self.filepath = filepath
+        self._ensure_dir()
 
-def _get_conn() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    return conn
+    def _ensure_dir(self) -> None:
+        os.makedirs(os.path.dirname(self.filepath), exist_ok=True)
 
+    def _load_all(self) -> dict[str, dict]:
+        if not os.path.exists(self.filepath):
+            return {}
+        try:
+            with open(self.filepath, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except (json.JSONDecodeError, IOError):
+            return {}
 
-def init_db() -> None:
-    with _get_conn() as conn:
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS players (
-                tg_id INTEGER PRIMARY KEY,
-                tg_username TEXT,
-                display_name TEXT,
-                level INTEGER NOT NULL DEFAULT 1,
-                xp INTEGER NOT NULL DEFAULT 0,
-                stats TEXT NOT NULL DEFAULT '{}',
-                equipment TEXT NOT NULL DEFAULT '{}',
-                inventory TEXT NOT NULL DEFAULT '{}',
-                pets TEXT NOT NULL DEFAULT '[]',
-                active_expedition TEXT,
-                completed_expeditions INTEGER NOT NULL DEFAULT 0,
-                boss_kills INTEGER NOT NULL DEFAULT 0,
-                stat_points INTEGER NOT NULL DEFAULT 0
-            )
-            """
-        )
-        conn.commit()
+    def _save_all(self, data: dict[str, dict]) -> None:
+        with open(self.filepath, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
 
-
-# ---- save / load ---------------------------------------------------------
-
-def save_player(player: Player) -> None:
-    with _get_conn() as conn:
-        conn.execute(
-            """
-            INSERT INTO players (
-                tg_id, tg_username, display_name, level, xp,
-                stats, equipment, inventory, pets,
-                active_expedition, completed_expeditions, boss_kills, stat_points
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(tg_id) DO UPDATE SET
-                tg_username=excluded.tg_username,
-                display_name=excluded.display_name,
-                level=excluded.level,
-                xp=excluded.xp,
-                stats=excluded.stats,
-                equipment=excluded.equipment,
-                inventory=excluded.inventory,
-                pets=excluded.pets,
-                active_expedition=excluded.active_expedition,
-                completed_expeditions=excluded.completed_expeditions,
-                boss_kills=excluded.boss_kills,
-                stat_points=excluded.stat_points
-            """,
-            (
-                player.tg_id,
-                player.tg_username,
-                player.display_name,
-                player.level,
-                player.xp,
-                json.dumps(player.stats, ensure_ascii=False),
-                json.dumps(player.equipment, ensure_ascii=False),
-                json.dumps(player.inventory, ensure_ascii=False),
-                json.dumps(player.pets, ensure_ascii=False),
-                json.dumps(player.active_expedition, ensure_ascii=False) if player.active_expedition else None,
-                player.completed_expeditions,
-                player.boss_kills,
-                getattr(player, "stat_points", 0),
-            ),
-        )
-        conn.commit()
-
-
-def load_player(tg_id: int) -> Optional[Player]:
-    with _get_conn() as conn:
-        row = conn.execute("SELECT * FROM players WHERE tg_id = ?", (tg_id,)).fetchone()
-    if not row:
+    def get(self, user_id: int) -> Optional[Player]:
+        all_players = self._load_all()
+        raw = all_players.get(str(user_id))
+        if raw:
+            return Player.from_dict(raw)
         return None
-    return _row_to_player(row)
 
+    def save(self, player: Player) -> None:
+        all_players = self._load_all()
+        all_players[str(player.user_id)] = player.to_dict()
+        self._save_all(all_players)
 
-def _row_to_player(row: sqlite3.Row) -> Player:
-    return Player(
-        tg_id=row["tg_id"],
-        tg_username=row["tg_username"],
-        display_name=row["display_name"],
-        level=row["level"],
-        xp=row["xp"],
-        stats=json.loads(row["stats"]),
-        equipment=json.loads(row["equipment"]),
-        inventory=json.loads(row["inventory"]),
-        pets=json.loads(row["pets"]),
-        active_expedition=json.loads(row["active_expedition"]) if row["active_expedition"] else None,
-        completed_expeditions=row["completed_expeditions"],
-        boss_kills=row["boss_kills"],
-    )
+    def delete(self, user_id: int) -> None:
+        all_players = self._load_all()
+        all_players.pop(str(user_id), None)
+        self._save_all(all_players)
 
-
-def get_or_create(tg_id: int, username: Optional[str] = None) -> Player:
-    player = load_player(tg_id)
-    if player is None:
-        player = Player(tg_id=tg_id, tg_username=username)
-        save_player(player)
-    return player
+    def leaderboard(self, limit: int = 10) -> list[Player]:
+        all_players = self._load_all()
+        players = [Player.from_dict(v) for v in all_players.values()]
+        players.sort(key=lambda p: (p.level, p.xp), reverse=True)
+        return players[:limit]

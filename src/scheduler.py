@@ -1,205 +1,174 @@
 # ==========================================
-# SCHEDULER — expedition timers (async callbacks)
+# SCHEDULER — expedition finish loop
 # ==========================================
 
 import asyncio
-from datetime import datetime, timedelta
-from typing import Callable, Coroutine, Dict
+import logging
+import random
+from datetime import datetime, timedelta, timezone
+from typing import Optional
 
-from config import BOSSES, EXPEDITION_COOLDOWN_SECONDS, HOURS_PER_EXPEDITION
-from models import ExpeditionResult, Player
+from aiogram import Bot
 
+from .combat import resolve_expedition, CombatResult
+from .config import LOCATIONS_DS
+from .models import Player
+from .storage import AsyncStorage
 
-# In-memory timer registry: tg_id -> asyncio.Task
-_timers: Dict[int, asyncio.Task] = {}
-
-
-# Signature for the callback that handles expedition completion:
-# async def on_expedition_complete(player: Player, result: ExpeditionResult) -> None
-CallbackType = Callable[[Player, ExpeditionResult], Coroutine]
-
-
-def start_expedition_timer(
-    player: Player,
-    location_id: int,
-    callback: CallbackType,
-) -> None:
-    """Start or restart an expedition timer for a player."""
-    # Cancel existing timer if any
-    cancel_timer(player.tg_id)
-
-    duration_hours = HOURS_PER_EXPEDITION.get(location_id, 1.5)
-    duration_seconds = int(duration_hours * EXPEDITION_COOLDOWN_SECONDS)
-    end_time = datetime.now() + timedelta(seconds=duration_seconds)
-
-    # Build end time info on player
-    player.active_expedition = {
-        "location_id": location_id,
-        "end_time_iso": end_time.isoformat(),
-        "boss": False,
-    }
-
-    task = asyncio.create_task(
-        _wait_then_callback(player, location_id, duration_seconds, callback)
-    )
-    _timers[player.tg_id] = task
+logger = logging.getLogger(__name__)
 
 
-async def _wait_then_callback(
-    player: Player,
-    location_id: int,
-    duration_seconds: int,
-    callback: CallbackType,
-) -> None:
-    """Sleep then simulate combat and call handler."""
-    from combat import run_auto_battle, roll_pet  # avoid circular at module init
+def humanize_duration(seconds: int) -> str:
+    m, s = divmod(max(seconds, 0), 60)
+    parts = []
+    if m:
+        parts.append(f"{m} мин.")
+    if s:
+        parts.append(f"{s} сек.")
+    return " ".join(parts) or "0 сек."
 
-    await asyncio.sleep(duration_seconds)
 
-    # Determine boss or mob
-    boss_data = BOSSES.get(location_id)
-    is_boss = False
-    if boss_data:
-        # 30% boss chance
-        import random
+class ExpeditionScheduler:
+    def __init__(
+        self,
+        bot: Bot,
+        storage: AsyncStorage,
+        check_interval: float = 5.0,
+    ):
+        self.bot = bot
+        self.storage = storage
+        self.check_interval = check_interval
+        self._task: Optional[asyncio.Task] = None
+        self._cooldowns: dict[int, datetime] = {}
 
-        if random.random() < 0.30:
-            is_boss = True
-            mob = boss_data
+    # --------------------------------------------------------------
+    # public API
+    # --------------------------------------------------------------
+
+    def is_on_cooldown(self, player: Player, now: datetime | None = None) -> bool:
+        until = self._cooldowns.get(player.tg_id)
+        if until is None:
+            return False
+        return (now or datetime.now(timezone.utc)) < until
+
+    def cooldown_remaining(self, player: Player) -> int:
+        until = self._cooldowns.get(player.tg_id)
+        if until is None:
+            return 0
+        return max(int((until - datetime.now(timezone.utc)).total_seconds()), 0)
+
+    def set_cooldown(self, player: Player, min_sec: int = 600, max_sec: int = 1800) -> int:
+        seconds = random.randint(min_sec, max_sec)
+        until = datetime.now(timezone.utc) + timedelta(seconds=seconds)
+        self._cooldowns[player.tg_id] = until
+        return seconds
+
+    def start(self) -> None:
+        if self._task is None or self._task.done():
+            self._task = asyncio.create_task(self._loop())
+
+    def stop(self) -> None:
+        if self._task and not self._task.done():
+            self._task.cancel()
+
+    # --------------------------------------------------------------
+    # internal loop
+    # --------------------------------------------------------------
+
+    async def _loop(self) -> None:
+        while True:
+            try:
+                await self._tick()
+            except Exception:
+                logger.exception("Scheduler tick error")
+            await asyncio.sleep(self.check_interval)
+
+    async def _tick(self) -> None:
+        raw_users = await self.storage.get_all_users()
+        now = datetime.now(timezone.utc)
+
+        for raw in raw_users:
+            if not raw.get("current_location"):
+                continue
+            started_raw = raw.get("expedition_started_at")
+            if not started_raw:
+                continue
+
+            loc_id = raw["current_location"]
+            loc = LOCATIONS_DS.get(loc_id)
+            if loc is None:
+                logger.warning("Unknown location %s for user %s", loc_id, raw.get("tg_id"))
+                continue
+
+            started_dt = datetime.fromisoformat(started_raw)
+            if (now - started_dt).total_seconds() < loc.duration:
+                continue  # not done yet
+
+            player = Player(**raw)
+            try:
+                await self._finish_expedition(player, loc_id, loc, now)
+            except Exception:
+                logger.exception("Error finishing expedition for %s", player.tg_id)
+
+    # --------------------------------------------------------------
+    # expedition finish helpers
+    # --------------------------------------------------------------
+
+    async def _finish_expedition(
+        self,
+        player: Player,
+        loc_id: int,
+        loc,
+        now: datetime,
+    ) -> None:
+        # resolve expedition logic (combat + drops)
+        result = await resolve_expedition(player, loc_id, loc)
+
+        # build message
+        msg_parts = [f"🎉 Вы вернулись из {loc.name} 🌍"]
+
+        if result.boss_name:
+            msg_parts.append(f"\n⚔️ Вы встретили босса: {result.boss_name}")
+            if isinstance(result.result, CombatResult):
+                msg_parts.append(result.result.message)
+            # drops are always present (even empty) when boss is present
+            if result.drops:
+                msg_parts.append("\n📦 Добыча с тела босса:")
         else:
-            # Pick random mob for this location from config
-            from config import MOBS
+            if result.drops:
+                msg_parts.append("\n📦 Добыча:")
+            else:
+                msg_parts.append("\n💨 Ничего не нашли. Как всегда.")
 
-            mobs_here = [m for m in MOBS if m.get("location_id") == location_id]
-            mob = mobs_here[0] if mobs_here else {"name": "Неизвестный", "base_hp": 10}
-    else:
-        from config import MOBS
+        drop_lines: list[str] = []
+        for idx, drop in enumerate(result.drops[:8], 1):
+            rarity_emoji = result._rarity_level.get(drop.rarity, "⬜")
+            line = f"  [{idx}] {rarity_emoji} {drop.name}"
+            if drop.desc:
+                line += f" — {drop.desc}"
+            drop_lines.append(line)
 
-        mobs_here = [m for m in MOBS if m.get("location_id") == location_id]
-        mob = mobs_here[0] if mobs_here else {"name": "Неизвестный", "base_hp": 10}
+        msg_parts.extend(drop_lines)
 
-    result = run_auto_battle(player, mob, is_boss=is_boss)
+        if result.summary_items:
+            msg_parts.append("")
+            for item in result.summary_items:
+                msg_parts.append(f"  {item}")
 
-    # Pet drop roll (only on mob kill, higher chance if boss)
-    if result.won:
-        pet_success, pet_data = roll_pet(location_id)
-        if pet_success and pet_data:
-            player.pets.append(pet_data)
-            result.messages.append(
-                f"✨ Ты приручил существо: {pet_data['name']}!"
-            )
+        txt = "\n".join(msg_parts)
 
-    # Increment completed
-    player.completed_expeditions += 1
-    if is_boss and result.won:
-        player.boss_kills += 1
+        # update player state
+        player.current_location = None
+        player.expedition_started_at = None
+        player.expedition_finishes_at = None
+        player.completed_expeditions += 1
+        if result.is_victory:
+            player.boss_kills += 1
 
-    # Clear active expedition
-    player.active_expedition = None
+        await self.storage.save(player.tg_id, player.model_dump())
 
-    # Callback (e.g. send message to user, award items)
-    await callback(player, result)
+        # set next free expedition cooldown
+        self.set_cooldown(player)
 
-    # Cleanup timer
-    _timers.pop(player.tg_id, None)
-
-
-def cancel_timer(tg_id: int) -> None:
-    """Cancel active expedition timer for a user. No-op if none."""
-    task = _timers.pop(tg_id, None)
-    if task and not task.done():
-        task.cancel()
-
-
-def is_on_expedition(player: Player) -> bool:
-    """Check if player has an active expedition (based on timer + active_expedition data)."""
-    if player.active_expedition is None:
-        return False
-    # Also check if timer exists
-    task = _timers.get(player.tg_id)
-    if task is None:
-        return False
-    return not task.done()
-
-
-def seconds_remaining(player: Player) -> int:
-    """Return seconds left for current expedition, or 0 if none/done."""
-    if player.active_expedition is None:
-        return 0
-    end_iso = player.active_expedition.get("end_time_iso")
-    if not end_iso:
-        return 0
-    end = datetime.fromisoformat(end_iso)
-    diff = (end - datetime.now()).total_seconds()
-    return max(0, int(diff))
-
-
-def restore_timers_on_startup(
-    all_players: list[Player],
-    callback: CallbackType,
-) -> None:
-    """After bot restart, recreate asyncio tasks for any players with active_expedition."""
-    now = datetime.now()
-    for p in all_players:
-        if not p.active_expedition:
-            continue
-        end_iso = p.active_expedition.get("end_time_iso")
-        if not end_iso:
-            # Corrupt data, clear it
-            p.active_expedition = None
-            continue
-        end = datetime.fromisoformat(end_iso)
-        remaining = int((end - now).total_seconds())
-        if remaining <= 0:
-            # Timer already expired while bot was down: fire immediately
-            task = asyncio.create_task(
-                _expedition_fire_now(p, p.active_expedition.get("location_id", 0), callback)
-            )
-        else:
-            task = asyncio.create_task(
-                _wait_then_callback(p, p.active_expedition.get("location_id", 0), remaining, callback)
-            )
-        _timers[p.tg_id] = task
-
-
-async def _expedition_fire_now(
-    player: Player,
-    location_id: int,
-    callback: CallbackType,
-) -> None:
-    from combat import run_auto_battle, roll_pet
-
-    from config import BOSSES, MOBS
-
-    boss_data = BOSSES.get(location_id)
-    is_boss = False
-    if boss_data:
-        import random
-
-        if random.random() < 0.30:
-            is_boss = True
-            mob = boss_data
-        else:
-            mobs_here = [m for m in MOBS if m.get("location_id") == location_id]
-            mob = mobs_here[0] if mobs_here else {"name": "Неизвестный", "base_hp": 10}
-    else:
-        mobs_here = [m for m in MOBS if m.get("location_id") == location_id]
-        mob = mobs_here[0] if mobs_here else {"name": "Неизвестный", "base_hp": 10}
-
-    result = run_auto_battle(player, mob, is_boss=is_boss)
-
-    if result.won:
-        pet_success, pet_data = roll_pet(location_id)
-        if pet_success and pet_data:
-            player.pets.append(pet_data)
-            result.messages.append(
-                f"✨ Ты приручил существо: {pet_data['name']}!"
-            )
-
-    player.completed_expeditions += 1
-    if is_boss and result.won:
-        player.boss_kills += 1
-
-    player.active_expedition = None
-    await callback(player, result)
-    _timers.pop(player.tg_id, None)
+        # send message
+        await self.bot.send_message(chat_id=player.tg_id, text=txt)

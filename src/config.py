@@ -1,76 +1,36 @@
-# ==========================================
-# CONFIG — Telegram Bot + Game Config
-# ==========================================
+"""Конфигурация бота"""
 
 import os
+from dotenv import load_dotenv
 
-# --- Bot ---
-TOKEN = os.getenv("TOKEN", "7750125763:AAFjHGXvA9v3EHp1L-OyB1280w6vP7pfnHU")
+load_dotenv()
 
-# --- Rarity colors ---
-RARITY_COLORS = {
-    "common":    "⬜",
-    "uncommon":  "🟩",
-    "rare":      "🟦",
-    "epic":      "🟪",
-    "legendary": "🟨",
-    "mythic":    "🟥",
+# Основные настройки
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+if not BOT_TOKEN:
+    raise ValueError("BOT_TOKEN must be set!")
+
+ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
+
+# Папки и пути
+DATA_DIR = "data"
+PLAYERS_FILE = os.path.join(DATA_DIR, "players.json")
+
+# Начальные параметры игрока
+INITIAL_STATS = {
+    "hp": 100,
+    "max_hp": 100,
+    "attack": 10,
+    "defense": 5,
+    "level": 1,
+    "xp": 0,
+    "xp_to_next": 100,
+    "gold": 50,
 }
 
-# --- Locations ---
-LOCATIONS = {
-    1: {
-        "key": "dark_forest",
-        "name": "🌲 Охуенно тёмный лес",
-        "emoji": "🌲",
-        "min_level": 1,
-        "duration": 300,  # 5 минут
-        "description": (
-            "В 🌲Охуенно Тёмном Лесу растёт особый вид сосны — 🌲Pinus Absurdus. "
-            "Её шишки не падают вниз, а выстреливают, попадая прямо в те места, "
-            "которые гномы берегут больше всего. 🌲👑Хвойный Барон — это древний дух леса, "
-            "принявший облик гигантского, покрытого мхом и лишайниками гуманоида, у которого "
-            "вместо головы — огромная, пульсирующая смоляная елда. Может спиздить ваши портки "
-            "или другую случайную вещь из инвентаря."
-        ),
-        "boss_name": "🌲👑 Хвойный Барон",
-        "boss_chance": 5,
-        "drops": [
-            {"item_key": "pine_needle",    "name": "🌿 Хвоя",          "chance": 60, "rarity": "common",    "desc": "Обычная сосновая хвоя."},
-            {"item_key": "wood",           "name": "🪵 Древесина",     "chance": 45, "rarity": "common",    "desc": "Кусок гнилой доски. Можно сделать дубину или употребить как растопку."},
-            {"item_key": "pine_cone",      "name": "🌰 Шишка",          "chance": 35, "rarity": "uncommon",  "desc": "Шишка Хвойного Барона. Ещё пульсирует."},
-            {"item_key": "spiderweb",      "name": "🕸️ Паутина",        "chance": 20, "rarity": "uncommon",  "desc": "Липкая, вонючая, с останками мух. Крафт-материал."},
-            {"item_key": "pet_egg",        "name": "🥚 Яйцо питомца",   "chance": 5,  "rarity": "rare",      "desc": "Из него может вылупиться что-то полезное."},
-            {"item_key": "baron_resin",    "name": "👑 Смола Барона",   "chance": 2,  "rarity": "epic",      "desc": "Редкий ресурс. Используется для крафта брони."},
-        ],
-    },
-    # Заглушки
-    2: {
-        "key": "abandoned_mine",
-        "name": "⛏️ Заброшенная шахта",
-        "emoji": "⛏️",
-        "min_level": 3,
-        "duration": 600,  # 10 минут
-        "description": "...",
-        "boss_name": "💀 Костяной Копальщик",
-        "boss_chance": 3,
-        "drops": [],
-    },
-    3: {
-        "key": "mountain_cave",
-        "name": "🦴 Логово горного уебана",
-        "emoji": "🦴",
-        "min_level": 5,
-        "duration": 900,  # 15 минут
-        "description": "...",
-        "boss_name": "🩸 Кровавый Ультрауебан",
-        "boss_chance": 2,
-        "drops": [],
-    },
-}
+# Боевые константы
+DUNGEON_REWARD_XP = 30
+DUNGEON_REWARD_GOLD = 20
 
-# --- Combat / Rewards ---
-BASE_XP_PER_EXPEDITION = 25
-BOSS_XP_BONUS = 100
-DROP_ROLLS = 3  # сколько раз роллить лут за экспедицию
-LOOT_CHANCE_MULTIPLIER = 1.0  # можно будет баффать
+# Пределы экспедиции
+EXPEDITION_MAX_DURATION_MINUTES = 1440  # 24 часа
