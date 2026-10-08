@@ -1,13 +1,3 @@
-<<<<<<< HEAD
-.env
-__pycache__/
-*.pyc
-*.pyo
-.venv/
-venv/
-*.log
-data/
-=======
 # Секреты и конфиги
 .env
 
@@ -25,4 +15,6 @@ __pycache__/
 # Окружение
 venv/
 .venv/
->>>>>>> bd0593c31f44d624d955bae7c70ac12d81e7bf08
+
+# Логи
+*.log

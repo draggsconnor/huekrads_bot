@@ -1,104 +1,182 @@
-from __future__ import annotations
+"""Боевые команды и обработчики — бои с монстрами и боссами."""
 
+import logging
 import random
-from typing import List
 
-from .config import BASE_XP_PER_EXPEDITION, BOSS_XP_BONUS, DROP_ROLLS, LOOT_CHANCE_MULTIPLIER, LOCATIONS
-from .models import ExpeditionResult, Player
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.ext import ContextTypes
+
+from .config import MONSTERS, XP_REWARDS
+from .models import FightData, FightType, Player
+from .storage import Storage
+from .utils import r2
+
+logger = logging.getLogger(__name__)
+storage = Storage()
 
 
-def resolve_expedition(player: Player, location_id: int) -> ExpeditionResult:
-    """Полностью симулирует экспедицию. Вызывается СРАЗУ при нажатии кнопки 'Отправиться'.
-    Результат сохраняется и показывается по таймеру."""
-    location = LOCATIONS[location_id]
-    messages: List[str] = []
+# ═══════════════════════════════════════════════════════════════
+# /fight  — запуск боя
+# ═══════════════════════════════════════════════════════════════
 
-    # --- Босс? ---
-    is_boss = random.randint(1, 100) <= location["boss_chance"]
+async def cmd_fight(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Текстовая команда /fight."""
+    user = update.effective_user
+    if not user:
+        return
 
-    if is_boss:
-        messages.append(f"⚠️ Внезапно появляется {location['boss_name']}!")
-        # Шанс победы over боссом — скалируется с уровнем
-        # Базово 30%, +5% за каждый уровень, макс 80%
-        win_chance = min(30 + (player.level * 5), 80)
-        won = random.randint(1, 100) <= win_chance
+    player = storage.load_player(user.id)
+    if player.hp <= 0:
+        if update.message:
+            await update.message.reply_text("❌ Ты мёртв. Воскресни в меню.")
+        return
 
-        if won:
-            messages.append(f"🏆 Ты победил {location['boss_name']}!")
-            xp_gained = BOSS_XP_BONUS + (player.level * 10)
-            messages.append(f"⭐ +{xp_gained} XP")
-            loot = _roll_loot(location, rolls=DROP_ROLLS + 2, is_boss=True)  # Больше лута за босса
-            if loot:
-                messages.append("🎁 Трофеи:")
-                for item in loot:
-                    qty = f" x{item['count']}" if item.get("count", 1) > 1 else ""
-                    messages.append(f"   {item['name']}{qty}")
-            player.boss_kills += 1
-        else:
-            messages.append(f"💀 {location['boss_name']} разгромил тебя.")
-            xp_gained = BASE_XP_PER_EXPEDITION // 2
-            messages.append(f"⭐ +{xp_gained} XP (выжил, но едва)")
-            loot = []
+    enemy_conf = random.choice(MONSTERS)
+    enemy = Player.from_dict(enemy_conf)
+    enemy.hp = enemy.max_hp
+
+    data = FightData(enemy=enemy, type=FightType.STANDARD)
+
+    # Опционально: давать опыт за победу над этим врагом
+    data.xp_reward = XP_REWARDS.get(enemy.name, 0)
+
+    msg = f"⚔️ {player.name} вступает в бой с {enemy.name}!"
+
+    keyboard = [
+        [
+            InlineKeyboardButton("🗡 Атаковать", callback_data="fight_start"),
+            InlineKeyboardButton("🏃 Сбежать", callback_data="fight_flee"),
+        ]
+    ]
+
+    if update.message:
+        await update.message.reply_text(
+            msg, reply_markup=InlineKeyboardMarkup(keyboard)
+        )
     else:
-        # Обычная экспедиция
-        won = True
-        xp_gained = BASE_XP_PER_EXPEDITION + random.randint(0, 10)
-        messages.append(f"✅ Экспедиция в {location['name']} завершена!")
-        messages.append(f"⭐ +{xp_gained} XP")
-        loot = _roll_loot(location, rolls=DROP_ROLLS, is_boss=False)
-        if loot:
-            messages.append("🎁 Найдено:")
-            for item in loot:
-                qty = f" x{item['count']}" if item.get("count", 1) > 1 else ""
-                messages.append(f"   {item['name']}{qty}")
+        # fallback
+        await update.effective_chat.send_message(
+            msg, reply_markup=InlineKeyboardMarkup(keyboard)
+        )
 
-    # Начисляем XP
-    player.add_xp(xp_gained)
 
-    # Добавляем лут в инвентарь (атомарно)
-    for item in loot:
-        _add_loot_safe(player, item)
+async def cb_menu_fight(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Кнопка « Бой» в главном меню."""
+    query = update.callback_query
+    if query:
+        await query.answer()
+    return await cmd_fight(update, ctx)
 
-    player.completed_expeditions += 1
-    player.save()
 
-    return ExpeditionResult(
-        location_id=location_id,
-        is_boss=is_boss,
-        won=won,
-        loot=loot,
-        xp_gained=xp_gained,
-        messages=messages,
+# ═══════════════════════════════════════════════════════════════
+# Обработка инлайн-кнопок боя
+# ═══════════════════════════════════════════════════════════════
+
+async def cb_fight_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Нажали «Атаковать»."""
+    query = update.callback_query
+    await query.answer()
+
+    user = update.effective_user
+    player = storage.load_player(user.id)
+
+    if player.hp <= 0:
+        await query.edit_message_text("💀 Ты уже мёртв.")
+        return
+
+    # Восстанавливаем HP врага на всякий случай
+    enemy = Player.from_dict(random.choice(MONSTERS))
+    enemy.hp = enemy.max_hp
+
+    data = FightData(enemy=enemy, type=FightType.STANDARD)
+    data.xp_reward = XP_REWARDS.get(enemy.name, 0)
+
+    # Простой бой — один раунд
+    pdmg = random.randint(enemy.min_damage, enemy.max_damage)
+    edmg = random.randint(player.min_damage, player.max_damage)
+
+    player.hp -= pdmg
+    enemy.hp -= edmg
+
+    # Лог
+    log_lines = []
+
+    # Фразы
+    p_phrase = random.choice(enemy.phrases) if enemy.phrases else "Атакует!"
+    e_phrase = random.choice(player.phrases) if player.phrases else "Атакует!"
+    log_lines.append(r2(p_phrase) if hasattr(r2, "__call__") else p_phrase)
+    log_lines.append(r2(e_phrase) if hasattr(r2, "__call__") else e_phrase)
+
+    if player.hp <= 0:
+        player.hp = 0
+        player.dead = True
+        result = f"💀 Ты пал в бою с {enemy.name}!"
+        storage.save_player(player)
+        await query.edit_message_text(f"{result}\n\n" + "\n".join(log_lines))
+        return
+
+    if enemy.hp <= 0:
+        # Победа
+        xp = data.xp_reward
+        if xp:
+            player.add_xp(xp)
+        player.kills += 1
+
+        # С небольшим шансом — лут
+        loot = None
+        if random.random() < 0.3:
+            from .config import ITEMS
+
+            loot = random.choice(ITEMS)
+            player.inventory.append(loot["key"])
+            log_lines.append(f"🎁 Трофей: {loot['name']}")
+
+        storage.save_player(player)
+
+        result = f"🏆 Победа над {enemy.name}!"
+        if xp:
+            result += f" (+{xp} XP)"
+        if player.kills % 10 == 0:
+            result += "\n✨ Достижение: 10 побед подряд!"
+
+        await query.edit_message_text(
+            f"{result}\n\n" + "\n".join(log_lines),
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("⚔️ Следующий бой", callback_data="fight_start")],
+                [InlineKeyboardButton("🔙 В меню", callback_data="menu_back")]
+            ])
+        )
+        return
+
+    # Бой продолжается
+    storage.save_player(player)
+
+    msg = (
+        f"⚔️ Бой с {enemy.name}!\n\n"
+        f"Твой HP: {player.hp}/{player.max_hp}\n"
+        f"Враг HP: {enemy.hp}/{enemy.max_hp}\n\n"
+        + "\n".join(log_lines)
+    )
+
+    await query.edit_message_text(
+        msg,
+        reply_markup=InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("🗡 Атаковать", callback_data="fight_start"),
+                InlineKeyboardButton("🏃 Сбежать", callback_data="fight_flee"),
+            ]
+        ])
     )
 
 
-def _roll_loot(location: dict, rolls: int, is_boss: bool) -> List[dict]:
-    """Роллит лут из таблицы дропов локации."""
-    drops = location.get("drops", [])
-    if not drops:
-        return []
+async def cb_fight_flee(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Сбежать из боя."""
+    query = update.callback_query
+    await query.answer()
 
-    loot: List[dict] = []
-    for _ in range(rolls):
-        # Выбираем один предмет по шансу
-        roll = random.randint(1, 100)
-        cumulative = 0
-        for drop in drops:
-            cumulative += int(drop["chance"] * LOOT_CHANCE_MULTIPLIER)
-            if roll <= cumulative:
-                loot.append(drop)
-                break
-        else:
-            # Ничего не выпало
-            pass
-
-    # Уникализируем по имени, но считаем количество
-    merged: dict = {}
-    for item in loot:
-        key = item["item_key"]
-        if key not in merged:
-            merged[key] = {**item, "count": 1}
-        else:
-            merged[key]["count"] += 1
-
-    return list(merged.values())
+    await query.edit_message_text(
+        "🏃 Ты сбежал с поля боя.",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔙 В меню", callback_data="menu_back")]
+        ])
+    )

@@ -3,8 +3,8 @@
 import json
 import os
 from typing import Optional
-from config import PLAYERS_FILE
-from models import Player
+from .config import PLAYERS_FILE
+from .models import Player
 
 
 class Storage:
