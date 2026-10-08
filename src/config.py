@@ -1,4 +1,5 @@
 import os
+from typing import TypedDict
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -21,8 +22,37 @@ NUM_SLOTS = 7
 MY_USER_ID = MANAGER_ID
 
 # ═══════════════════════════════════════════════════════════════
+# ПУТИ К ФАЙЛАМ ДАННЫХ
+# ═══════════════════════════════════════════════════════════════
+
+PLAYERS_DIR = "data/players"
+PLAYERS_FILE = f"{PLAYERS_DIR}/players.json"
+
+# ═══════════════════════════════════════════════════════════════
 # ИГРОВЫЕ КОНСТАНТЫ
 # ═══════════════════════════════════════════════════════════════
+
+
+class Stats(TypedDict):
+    """Статистики крада."""
+
+    hp: int
+    strength: int
+    agility: int
+    intelligence: int
+
+
+# Для совместимости с models.py
+INITIAL_STATS = {
+    "hp": 30,
+    "max_hp": 30,
+    "attack": 10,
+    "defense": 5,
+    "level": 1,
+    "xp": 0,
+    "xp_to_next": 100,
+    "gold": 0,
+}
 
 # Длительность экспедиции (в секундах)
 EXPEDITION_DURATION = 300  # 5 минут

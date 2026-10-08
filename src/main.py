@@ -159,11 +159,11 @@ async def button_dispatcher(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await cb_menu_fight(update, context)
     elif data.startswith("fight_"):
         await cb_fight_start(update, context)
-    elif data.startswith("menu_expedition"):
+    elif data == "menu_expedition":
         await cb_menu_expedition(update, context)
-    elif data.startswith("exp_start_"):
+    elif data.startswith("exp_start:"):
         await cb_exp_start(update, context)
-    elif data.startswith("exp_back_"):
+    elif data == "exp_finish":
         await cb_exp_finish(update, context)
     elif data == "admin_stats":
         await admin_stats(update, context)

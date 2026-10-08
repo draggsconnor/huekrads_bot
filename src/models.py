@@ -1,141 +1,154 @@
-"""Модели данных игрока и результатов экспедиций."""
+"""Модели данных: игроки, инвентарь, хранилище"""
 
-from __future__ import annotations
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from enum import Enum
 
-import time
-from dataclasses import dataclass, field, asdict
-from typing import Optional
 
-from .config import INITIAL_STATS
-from .storage import save_player
+class FightType(str, Enum):
+    """Тип боя."""
+    STABLE = "stable"
+    CRAZY = "crazy"
+    AUTO = "auto"
 
 
 @dataclass
-class ExpeditionResult:
-    """Результат симуляции экспедиции. Сохраняется пока ждём таймер."""
+class FightData:
+    """Состояние текущего боя."""
+    initiator_id: int | None = None
+    target_id: int | None = None
+    fight_type: str | None = None
+    bet: int = 0
+    message_id: int | None = None
+    initiator_rollers: list[int] = field(default_factory=list)
+    target_rollers: list[int] = field(default_factory=list)
+    rounds: int = 0
+    current_player: int | None = None
 
-    location_id: int
-    is_boss: bool
-    won: bool
-    loot: list  # [{"item_key": str, "name": str, "count": int, ...}, ...]
-    xp_gained: int
-    messages: list[str]  # то, что покажем игроку по окончании
+
+@dataclass
+class ExpeditionState:
+    """Состояние экспедиции игрока."""
+    tg_id: int
+    start_time: datetime
+    duration_min: int
+    started: bool = False
+    finished: bool = False
+    result_message: str = ""
 
 
 @dataclass
 class Player:
-    """Модель игрока"""
+    """Представление игрока (соответствует PyYaml-штукам)."""
 
     tg_id: int
-
-    # Основные характеристики
-    name: str = ""
-    hp: int = INITIAL_STATS["hp"]
-    max_hp: int = INITIAL_STATS["max_hp"]
-    attack: int = INITIAL_STATS["attack"]
-    defense: int = INITIAL_STATS["defense"]
-
-    # Прогресс
-    level: int = INITIAL_STATS["level"]
-    xp: int = INITIAL_STATS["xp"]
-    xp_to_next: int = INITIAL_STATS["xp_to_next"]
-    gold: int = INITIAL_STATS["gold"]
-
-    # Статистика
-    boss_kills: int = 0
-    completed_expeditions: int = 0
-
-    # Инвентарь: {"item_key": count, ...}
+    name: str = "Викинг"
+    level: int = 1
+    gold: int = 0
+    xp: int = 0
+    hp: int = 100
+    max_hp: int = 100
     inventory: dict = field(default_factory=dict)
+    equipment: dict = field(default_factory=dict)
+    status: str = "idle"
+    dead: bool = False
+    last_activity: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
-    # Системные поля
-    expedition: Optional[dict] = None  # {"location_id": int, "end_time": float}
-    created_at: float = field(default_factory=time.time)
-    updated_at: float = field(default_factory=time.time)
-
-    # --------------------------------------------------------------
-    # Сериализация
-    # --------------------------------------------------------------
     def to_dict(self) -> dict:
-        return asdict(self)
+        """Сериализация."""
+        return {
+            "tg_id": self.tg_id,
+            "name": self.name,
+            "level": self.level,
+            "gold": self.gold,
+            "xp": self.xp,
+            "hp": self.hp,
+            "max_hp": self.max_hp,
+            "inventory": self.inventory,
+            "equipment": self.equipment,
+            "status": self.status,
+            "dead": self.dead,
+            "last_activity": self.last_activity.isoformat(),
+        }
 
     @classmethod
     def from_dict(cls, data: dict) -> "Player":
-        valid_fields = {k: v for k, v in data.items() if k in cls.__dataclass_fields__}
-        return cls(**valid_fields)
+        """Десериализация."""
+        pl = cls(
+            tg_id=data["tg_id"],
+            name=data.get("name", "Викинг"),
+            level=data.get("level", 1),
+            gold=data.get("gold", 0),
+            xp=data.get("xp", 0),
+            hp=data.get("hp", 100),
+            max_hp=data.get("max_hp", 100),
+            inventory=data.get("inventory", {}),
+            equipment=data.get("equipment", {}),
+            status=data.get("status", "idle"),
+            dead=data.get("dead", False),
+        )
+        last = data.get("last_activity")
+        pl.last_activity = (
+            datetime.fromisoformat(last) if last else datetime.now(timezone.utc)
+        )
+        return pl
 
-    # --------------------------------------------------------------
-    # Жизненный цикл
-    # --------------------------------------------------------------
-    def is_dead(self) -> bool:
-        return self.hp <= 0
+    def update_activity(self) -> None:
+        """Обновить время последней активности."""
+        self.last_activity = datetime.now(timezone.utc)
 
-    def heal(self, amount: int) -> None:
-        self.hp = min(self.hp + amount, self.max_hp)
+    @property
+    def alive(self) -> bool:
+        """Проверка что игрок жив."""
+        return not self.dead
 
-    def take_damage(self, amount: int) -> None:
-        actual = max(amount - self.defense, 1)
-        self.hp = max(self.hp - actual, 0)
+    @property
+    def attack(self) -> int:
+        """Базовая атака."""
+        return self.level * 2 + 5
 
-    # --------------------------------------------------------------
-    # XP / уровни
-    # --------------------------------------------------------------
-    def add_xp(self, amount: int) -> list[str]:
-        """Добавить XP, обработать повышение уровня. Возвращает список сообщений."""
-        messages: list[str] = []
-        self.xp += amount
-        while self.xp >= self.xp_to_next:
-            self.xp -= self.xp_to_next
-            self.level_up()
-            messages.append(
-                f"🎉 Уровень повышен до {self.level}!\n"
-                f"   ❤️ HP: +10 | ⚔️ Атака: +2 | 🛡 Защита: +1"
-            )
-        return messages
+    @property
+    def defense(self) -> int:
+        """Базовая защита."""
+        return self.level * 1 + 2
 
-    def level_up(self) -> None:
-        self.level += 1
-        self.xp_to_next = int(self.xp_to_next * 1.3)
-        self.max_hp += 10
-        self.attack += 2
-        self.defense += 1
-        self.hp = self.max_hp
+    def total_attack(self) -> int:
+        """Полная атака с учётом снаряжения."""
+        total = self.attack
+        for item, count in self.inventory.items():
+            if "ATK" in str(item):
+                total += count * 2
+        return total
 
-    # --------------------------------------------------------------
-    # Экспедиции
-    # --------------------------------------------------------------
-    def expedition_active(self) -> bool:
-        if self.expedition is None:
-            return False
-        return time.time() < self.expedition["end_time"]
+    def total_defense(self) -> int:
+        """Полная защита с учётом снаряжения."""
+        total = self.defense
+        for item, count in self.inventory.items():
+            if "DEF" in str(item):
+                total += count * 1
+        return total
 
-    def expedition_time_left(self) -> Optional[int]:
-        """Оставшиеся секунды до конца экспедиции, или None."""
-        if not self.expedition_active():
-            return None
-        return max(0, int(self.expedition["end_time"] - time.time()))
 
-    # --------------------------------------------------------------
-    # Инвентарь
-    # --------------------------------------------------------------
-    def add_loot(self, item: dict) -> None:
-        """Атомарно добавить предмет с учётом count."""
-        key = item["item_key"]
-        qty = item.get("count", 1)
-        self.inventory[key] = self.inventory.get(key, 0) + qty
+class UserStorage:
+    """Мост для совместимости, использует Storage."""
 
-    def formatted_inventory(self) -> str:
-        """Красивый вывод инвентаря, или сообщение о пустоте."""
-        if not self.inventory:
-            return "📦 Инвентарь пуст."
-        lines = ["📦 Инвентарь:"]
-        for key, qty in sorted(self.inventory.items()):
-            lines.append(f"   {key} x{qty}")
-        return "\n".join(lines)
+    def __init__(self, players_file: str):
+        # Отложенный импорт чтобы избежать циклических зависимостей
+        from .storage import Storage
 
-    # --------------------------------------------------------------
-    # Персистентность
-    # --------------------------------------------------------------
-    def save(self) -> None:
-        self.updated_at = time.time()
-        save_player(self)
+        self._storage = Storage(players_file)
+
+    def get(self, tg_id: int) -> Player | None:
+        return self._storage.load_player(tg_id)
+
+    def load_player(self, tg_id: int) -> Player | None:
+        return self._storage.load_player(tg_id)
+
+    def save(self, player: Player) -> None:
+        self._storage.save(player)
+
+    def save_player(self, player: Player) -> None:
+        self._storage.save(player)
+
+    def load_players(self) -> dict[int, Player]:
+        return self._storage.load_players()

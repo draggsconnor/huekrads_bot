@@ -1,263 +1,217 @@
-"""Обработчики экспедиций: запуск, выбор, завершение."""
+"""Экспедиции (разведывательные операции)."""
 
-import logging
+import asyncio
 import random
+from datetime import datetime, timezone
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import Update
+from telegram.ext import ContextTypes
 
-from src.config import EXPEDITION_DURATION
-from src.models import Player
-from src.scheduler import time_left
-from src.storage import Storage
+from src.config import EXPEDITIONS
+from src.models import ExpeditionState
+from src.storage import PlayerStorage
+from src.text_manager import t
 
-logger = logging.getLogger(__name__)
-
-STORAGE = Storage()
-
-
-# ──────────────────────────────────────────────────────────────────
-# PUBLIC API
-# ──────────────────────────────────────────────────────────────────
+storage = PlayerStorage()
 
 
-async def cmd_expedition(update: Update, _ctx) -> None:
-    """/expedition — начать или проверить экспедицию."""
-    user = update.effective_user
-    if not user:
-        return
-    player = STORAGE.load_player(user.id)
-
-    if player.expedition_ends is not None:
-        remaining = time_left(player.expedition_ends, duration=EXPEDITION_DURATION)
-        await __notify_running(update, player, remaining)
-    else:
-        await __show_menu(update, player)
-
-
-async def cb_menu_expedition(update: Update, _ctx) -> None:
-    """Callback `menu|expedition` — показать меню."""
-    query = update.callback_query
-    await query.answer()
-    player = STORAGE.load_player(query.from_user.id)
-    await __show_menu(update, player)
-
-
-async def cb_exp_start(update: Update, _ctx) -> None:
-    """Callback `exp_start|<idx>` — начать экспедицию."""
-    query = update.callback_query
-    await query.answer()
-
-    idx = int(query.data.split("|")[1])
-    player = STORAGE.load_player(query.from_user.id)
-
-    tier = player.exp_tier_unlocked()
-    options = _expedition_options(tier)
-
-    if not (0 <= idx < len(options)):
-        await query.edit_message_text("⚠️ Недопустимый вариант.")
+async def cmd_expedition(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/expedition – вызов подменю экспедиций."""
+    tg_id = update.effective_user.id
+    player = storage.load(str(tg_id))
+    if not player:
+        await update.effective_chat.send_message(t("not_registered"))
         return
 
-    if player.expedition_ends is not None:
-        remaining = time_left(player.expedition_ends, duration=EXPEDITION_DURATION)
-        await __notify_running(update, player, remaining)
-        return
-
-    # Вычитаем стоимость
-    cost = options[idx].get("cost", 0)
-    if player.gold < cost:
-        await query.edit_message_text("💰 Недостаточно золота!")
-        return
-
-    player.gold -= cost
-    player.start_expedition(options[idx]["name"])
-    STORAGE.save_player(player)
-
-    await query.edit_message_text(
-        f"🗺 {options[idx]['name']} начата!\n"
-        f"⏳ Вернётесь через {EXPEDITION_DURATION[tier]} мин.",
-    )
+    text = "🗺 *Отправиться на зaгадочную экспедицию?*\n\n_Ты можешь завершить её командой /expedition ещё раз, когда срок истечёт._"
+    kbd = expeditions_keyboard(player.level)
+    await update.effective_chat.send_message(text, reply_markup=kbd, parse_mode="Markdown")
 
 
-async def cb_exp_finish(update: Update, _ctx) -> None:
-    """Callback `exp_finish` — досрочное завершение через алмазы."""
-    query = update.callback_query
-    await query.answer()
-    player = STORAGE.load_player(query.from_user.id)
+def expeditions_keyboard(lvl: int):
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
-    if player.expedition_ends is None:
-        await query.edit_message_text("❌ Нет активной экспедиции.")
-        return
-
-    remaining = time_left(player.expedition_ends, duration=EXPEDITION_DURATION)
-    if remaining <= 0:
-        await __grant_rewards(update, player)
-    else:
-        cost = _rush_cost(remaining)
-
-        if player.diamonds < cost:
-            await query.edit_message_text(
-                f"💎 Нужно {cost} алмазов для мгновенного завершения.",
+    rows = []
+    for key, data in EXPEDITIONS.items():
+        icon = data["icon"]
+        name = data["name"]
+        required = data["level"]
+        if lvl >= required:
+            rows.append(
+                [
+                    InlineKeyboardButton(
+                        text=f"{icon} {name}", callback_data=f"exp_start:{key}"
+                    )
+                ]
             )
-            return
-
-        player.diamonds -= cost
-        await __grant_rewards(update, player)
-
-
-# ──────────────────────────────────────────────────────────────────
-# HELPERS
-# ──────────────────────────────────────────────────────────────────
-
-
-async def __notify_running(update, player: Player, remaining: int) -> None:
-    """Сообщает, что экспедиция уже идёт."""
-    text = (
-        f"⏳ Экспедиция «{player.expedition_name}» в пути.\n"
-        f"🕒 Осталось: *{remaining}* мин."
-    )
-    reply_markup = InlineKeyboardMarkup(
-        [
+    if not rows:
+        rows.append(
             [
                 InlineKeyboardButton(
-                    "🏁 Завершить досрочно", callback_data="exp_finish",
-                ),
-            ],
-            [InlineKeyboardButton("🔙 Назад", callback_data="menu|expedition")],
-        ],
+                    text=t("expeditions_no_avail"), callback_data="noop"
+                )
+            ]
+        )
+    rows.append(
+        [InlineKeyboardButton(text=t("back"), callback_data="menu_expedition")]
+    )
+    return InlineKeyboardMarkup(rows)
+
+
+async def cb_exp_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+
+    player = storage.load(str(update.effective_user.id))
+    if not player:
+        await query.answer(t("not_registered"), show_alert=True)
+        return
+
+    data = query.data
+    key = data.split(":", 1)[1]
+    exp = EXPEDITIONS.get(key)
+    if not exp:
+        await query.answer("❌ Неизвестная экспедиция.", show_alert=True)
+        return
+
+    if player.data.get("in_expedition"):
+        await query.answer("❌ Ты уже в экспедиции!", show_alert=True)
+        return
+
+    lvl = player.level
+    if lvl < exp["level"]:
+        await query.answer("❌ Недостаточный уровень.", show_alert=True)
+        return
+
+    duration = exp["duration"]
+    fin = int(datetime.now(timezone.utc).timestamp()) + duration
+    player.data["in_expedition"] = True
+    player.data["expedition_name"] = exp["name"]
+    player.data["expedition_finish_time"] = fin
+    player.save()
+
+    text = (
+        f"🌍 <b>Экспедиция «{exp['name']}» начата!</b>\n\n"
+        f"⏳ Длительность: {duration // 3600} ч.\n"
+        f"📦 Собираешь редкие ресурсы и проводишь разведку местности…\n\n"
+        f"🎁 По завершении ты получишь ценные награды!"
     )
 
-    if update.callback_query:
-        await update.callback_query.edit_message_text(
-            text, reply_markup=reply_markup, parse_mode="Markdown",
-        )
-    else:
-        await update.message.reply_text(
-            text, reply_markup=reply_markup, parse_mode="Markdown",
-        )
+    await query.edit_message_text(
+        text=text,
+        parse_mode="HTML",
+        reply_markup=exp_in_progress_keyboard(),
+    )
+    await query.answer()
 
 
-async def __show_menu(update: Update, player: Player) -> None:
-    """Показывает доступные экспедиции по ячейкам."""
-    tier = player.exp_tier_unlocked()
-    options = _expedition_options(tier)
-
-    keyboard = []
-    for i, opt in enumerate(options, start=1):
-        name = opt["name"]
-        cost = opt.get("cost", 0)
-        btn_text = f"{i}. {name}" + (f" ({cost}💰)" if cost else "")
-        keyboard.append(
-            [InlineKeyboardButton(btn_text, callback_data=f"exp_start|{i - 1}")],
-        )
-
-    keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="menu|main")])
-
-    text = "🗺 *Выберите экспедицию:*\n\n" + __expedition_info(options, tier)
-
-    if update.callback_query:
-        await update.callback_query.edit_message_text(
-            text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown",
-        )
-    else:
-        await update.message.reply_text(
-            text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown",
-        )
-
-
-async def __grant_rewards(update: Update, player: Player) -> None:
-    """Выдаёт награду и завершает экспедицию."""
-    tier = player.exp_tier_unlocked()
-    options = _expedition_options(tier)
-    expedition = next(
-        (o for o in options if o["name"] == player.expedition_name), options[0],
+def exp_in_progress_keyboard():
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    return InlineKeyboardMarkup(
+        [[InlineKeyboardButton(text=t("finish"), callback_data="exp_finish")]]
     )
 
-    gold = expedition.get("gold", 0) + random.randint(0, expedition.get("gold_var", 0))
-    xp = expedition.get("xp", 0) + random.randint(0, expedition.get("xp_var", 0))
-    loot = expedition.get("loot", [])
 
-    player.gold += gold
-    player.xp += xp
-    drops: list[str] = []
-    for item, chance in loot:
-        if random.random() < chance:
-            player.inventory.setdefault(item, 0)
-            player.inventory[item] += 1
-            drops.append(item)
+async def cb_exp_finish(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
 
-    elapsed = player.expedition_duration_min()
-    player.finish_expedition()
+    p = storage.load(str(update.effective_user.id))
+    if not p:
+        await query.answer(t("not_registered"), show_alert=True)
+        return
 
-    lines = [f"🎉 Экспедиция завершена за *{elapsed}* мин!"]
-    lines.append(f"💰 Золото: +{gold}")
-    lines.append(f"⭐ Опыт: +{xp}")
+    if not p.data.get("in_expedition"):
+        await query.message.edit_text(
+            "❌ Ты сейчас не в экспедиции.",
+            reply_markup=None,
+        )
+        await query.answer()
+        return
 
-    if drops:
-        lines.append("🎁 Лут: " + ", ".join(drops))
-    else:
-        lines.append("🎁 Лута нет")
+    fin = p.data.get("expedition_finish_time", 0)
+    now_ts = int(datetime.now(timezone.utc).timestamp())
+    if now_ts < fin:
+        left = fin - now_ts
+        await query.message.edit_text(
+            f"⏳ Экспедиция ещё идёт. Осталось {left} сек.",
+            reply_markup=query.message.reply_markup,
+        )
+        await query.answer()
+        return
 
-    player.add_log("; ".join(lines))
-    STORAGE.save_player(player)
+    rewards = calc_expedition_loot()
+    xp = rewards["xp"]
+    gold = rewards["gold"]
+    loot = rewards["loot"]
+    p.add_xp(xp)
+    p.add_gold(gold)
+    for thing in loot:
+        p.add_inventory(thing)
+    p.data["expeditions_count"] = p.data.get("expeditions_count", 0) + 1
+    loc = p.data.get("expedition_name", "???")
+    del p.data["in_expedition"]
+    del p.data["expedition_finish_time"]
+    del p.data["expedition_name"]
+    p.save()
 
-    reply_markup = InlineKeyboardMarkup(
+    text = (
+        "🎉 <b>Экспедиция завершена!</b>\n\n"
+        f"🌍 Локация: {loc}\n\n"
+        f"📜 Краткий отчёт: Во время исследования «{loc}» ты обнаружил "
+        f"древние артефакты цивилизации, оставшиеся здесь с давних времён. "
+        f"Эти находки могут принести тебе немалую выгоду. "
+        f"Также удалось заработать немного опыта.\n\n"
+        f"💎 <b>Опыт:</b> +{xp}\n"
+        f"🪙 <b>Золото:</b> +{gold}\n"
+        f"🎒 <b>Добыча:</b> {', '.join(loot)}\n\n"
+        "🎁 Экспедиции — отличный способ набраться сил для будущих подвигов!"
+    )
+    await query.message.edit_text(text, reply_markup=None)
+    await query.answer()
+
+
+async def cb_menu_expedition(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    text = "🗺 *Куда отправишься?*"
+    keyboard = expedition_menu_keyboard()
+    await update.callback_query.edit_message_text(
+        text=text, reply_markup=keyboard, parse_mode="Markdown"
+    )
+
+
+def expedition_menu_keyboard():
+    """Клавиатура меню экспедиций."""
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
+    return InlineKeyboardMarkup(
         [
-            [InlineKeyboardButton("🗺 Ещё экспедиция", callback_data="menu|expedition")],
-            [InlineKeyboardButton("🔙 В меню", callback_data="menu|main")],
-        ],
+            [InlineKeyboardButton("🌍 Выбрать локацию", callback_data="expedition_choose")],
+            [InlineKeyboardButton("🔙 Назад", callback_data="menu_back")],
+        ]
     )
 
-    text = "\n".join(lines)
 
-    if update.callback_query:
-        await update.callback_query.edit_message_text(
-            text, reply_markup=reply_markup, parse_mode="Markdown",
-        )
-    else:
-        await update.message.reply_text(
-            text, reply_markup=reply_markup, parse_mode="Markdown",
-        )
+def calc_expedition_loot():
+    """Расчёт наград за экспедицию."""
+    xp = random.randint(10, 50)
+    gold = random.randint(20, 100)
+    possible_loot = ["Карта сокровищ", "Древний артефакт", "Магический кристалл", "Редкое растение"]
+    loot = random.sample(possible_loot, k=random.randint(0, 2))
+    return {"xp": xp, "gold": gold, "loot": loot}
 
 
-# ──────────────────────────────────────────────────────────────────
-# DATA
-# ──────────────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════
+# ФОНОВЫЕ ЭКСПЕДИЦИИ
+# ═══════════════════════════════════════════════
 
+async def do_expedition_background(state: ExpeditionState) -> None:
+    """
+    Эмуляция фонового прохождения экспедиции.
+    В реальном боте может выполняться через JobQueue.
+    """
+    await asyncio.sleep(state.duration_seconds)
+    state.finish_time = datetime.now(timezone.utc).timestamp()
+    state.completed = True
 
-def __expedition_info(options: list[dict], tier: int) -> str:
-    """Описание доступных экспедиций."""
-    duration = EXPEDITION_DURATION[tier]
-    info_lines: list[str] = []
-    for opt in options:
-        name = opt["name"]
-        cost = opt.get("cost", 0)
-        gold = opt.get("gold", 0)
-        xp = opt.get("xp", 0)
-        info_lines.append(
-            f"• {name} — {duration} мин, {gold}💰, {xp}⭐"
-            + (f", стоимость {cost}💰" if cost else ""),
-        )
-    return "\n".join(info_lines)
-
-
-def _expedition_options(tier: int) -> list[dict]:
-    """Варианты экспедиций по тиру."""
-    if tier == 2:
-        return [
-            {"name": "Древний храм", "gold": 30, "gold_var": 10, "xp": 25, "xp_var": 5, "cost": 15, "loot": [("Реликвия", 0.25)]},
-            {"name": "Туманный лес", "gold": 25, "gold_var": 8, "xp": 22, "xp_var": 4, "loot": [("Эликсир", 0.35)]},
-        ]
-    if tier == 1:
-        return [
-            {"name": "Заброшенная шахта", "gold": 15, "gold_var": 5, "xp": 12, "xp_var": 3, "loot": [("Железо", 0.4)]},
-            {"name": "Лабиринт крыс", "gold": 12, "gold_var": 4, "xp": 10, "xp_var": 2, "loot": [("Сыр", 0.6)]},
-        ]
-    return [
-        {"name": "Лесная опушка", "gold": 5, "gold_var": 2, "xp": 5, "xp_var": 1, "loot": [("Гриб", 0.5)]},
-        {"name": "Старый мост", "gold": 4, "gold_var": 2, "xp": 4, "xp_var": 1, "loot": []},
-    ]
-
-
-def _rush_cost(minutes_remaining: int) -> int:
-    """Стоимость досрочного завершения (1 алмаз за 5 минут)."""
-    return max(1, minutes_remaining // 5 + (1 if minutes_remaining % 5 else 0))
+    if state.on_completion:
+        await state.on_completion(state)

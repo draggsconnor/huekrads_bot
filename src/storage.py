@@ -31,6 +31,10 @@ class Storage:
             json.dump(data, f, ensure_ascii=False, indent=2)
 
     def get(self, user_id: int) -> Optional[Player]:
+        """Получить игрока по ID (старый метод)."""
+        return self.load_player(user_id)
+
+    def load_player(self, user_id: int) -> Optional[Player]:
         all_players = self._load_all()
         raw = all_players.get(str(user_id))
         if raw:
@@ -38,9 +42,14 @@ class Storage:
         return None
 
     def save(self, player: Player) -> None:
+        """Сохранить игрока (старый метод)."""
         all_players = self._load_all()
-        all_players[str(player.user_id)] = player.to_dict()
+        all_players[str(player.tg_id)] = player.to_dict()
         self._save_all(all_players)
+
+    def save_player(self, player: Player) -> None:
+        """Сохранить игрока."""
+        self.save(player)
 
     def delete(self, user_id: int) -> None:
         all_players = self._load_all()
@@ -52,3 +61,15 @@ class Storage:
         players = [Player.from_dict(v) for v in all_players.values()]
         players.sort(key=lambda p: (p.level, p.xp), reverse=True)
         return players[:limit]
+
+    def load_players(self) -> dict[int, Player]:
+        """Загрузить всех игроков как словарь {user_id: Player}."""
+        all_players = self._load_all()
+        return {int(k): Player.from_dict(v) for k, v in all_players.items()}
+
+
+# Удобные функции на уровне модуля
+def save_player(player: Player) -> None:
+    """Сохранить игрока через глобальное хранилище."""
+    storage = Storage()
+    storage.save(player)
