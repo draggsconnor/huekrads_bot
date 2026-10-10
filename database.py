@@ -1,3 +1,4 @@
+import os
 import random
 import re
 import sqlite3
@@ -9,7 +10,7 @@ import pytz
 from config import DUEL_TIMEZONE, DICK_STEAL_CHANCE, DICK_STEAL_CHANCE_PER_WIN, DIG_FIND_CHANCE
 from text_resources import get_text
 
-DB_NAME = "bot_database.db"
+DB_NAME = os.getenv("DATABASE_PATH", os.path.join("persist", "bot_database.db"))
 BIRTHDAY_COOLDOWN = timedelta(days=365)
 
 
@@ -35,6 +36,7 @@ def moscow_date_key(when: datetime | None = None) -> str:
 
 @contextmanager
 def get_db():
+    os.makedirs(os.path.dirname(os.path.abspath(DB_NAME)) or ".", exist_ok=True)
     conn = sqlite3.connect(DB_NAME)
     try:
         yield conn

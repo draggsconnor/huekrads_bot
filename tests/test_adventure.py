@@ -277,3 +277,209 @@ class TestLoaders:
             mobs = adv.load_mobs()
             assert "specific_mobs" in mobs
             assert "dark_forest" in mobs["specific_mobs"]
+
+
+class FakeRandom:
+    """Детерминированная замена random для тестов finish_expedition."""
+
+    def __init__(self, random_value=0.0):
+        self.random_value = random_value
+
+    def random(self):
+        return self.random_value
+
+    def choice(self, seq):
+        return seq[0]  # всегда первый вариант: "attack"
+
+    def randint(self, a, b):
+        return a  # минимальные броски
+
+
+def _write_json(path, data):
+    import json
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False)
+
+
+def _make_expedition(loc_id="test_loc", expired=True):
+    from datetime import datetime, timedelta, timezone
+    start = datetime.now(timezone.utc) - timedelta(minutes=10)
+    end = start + timedelta(minutes=5)
+    if not expired:
+        end = datetime.now(timezone.utc) + timedelta(minutes=5)
+    return {
+        "location_id": loc_id,
+        "location_name": "Тестовая локация",
+        "start_time": start.isoformat(),
+        "end_time": end.isoformat(),
+        "chat_id": 42,
+        "username": "tester",
+    }
+
+
+EMPTY_MOBS = {}
+EMPTY_LOCATIONS = {
+    "test_loc": {
+        "id": "test_loc",
+        "name": "Тестовая локация",
+        "resources": [],
+        "bosses": [],
+        "requirements": {"min_level": 1},
+    }
+}
+BOSS_LOCATIONS = {
+    "test_loc": {
+        "id": "test_loc",
+        "name": "Тестовая локация",
+        "resources": [],
+        "requirements": {"min_level": 1},
+        "bosses": [
+            {
+                "id": "test_boss",
+                "name": "Тестовый Босс",
+                "hp": 5,
+                "attack": 1,
+                "crit_chance": 0.05,
+                "encounter_chance": 1.0,
+                "base_reward": 25,
+                "loot": [
+                    {
+                        "item_id": "boss_trophy",
+                        "name": "👑 Трофей босса",
+                        "quantity_min": 1,
+                        "quantity_max": 1,
+                        "chance": 1.0,
+                    }
+                ],
+            }
+        ],
+    }
+}
+
+
+class TestClaimActiveExpedition:
+    """Тесты атомарного захвата экспедиции"""
+
+    def test_claim_returns_expedition_and_clears_store(self, tmp_path):
+        data_path = tmp_path / "player_data.json"
+        expedition = _make_expedition()
+        _write_json(data_path, {"123": {"hp": 200, "active_expedition": expedition}})
+
+        with patch.object(adv, "PLAYER_DATA_PATH", str(data_path)):
+            claimed = adv.claim_active_expedition(123)
+
+        assert claimed == expedition
+
+        import json as json_mod
+        with open(data_path, encoding="utf-8") as f:
+            stored = json_mod.load(f)
+        assert stored["123"]["active_expedition"] is None
+
+    def test_claim_twice_returns_none_second_time(self, tmp_path):
+        data_path = tmp_path / "player_data.json"
+        _write_json(data_path, {"123": {"hp": 200, "active_expedition": _make_expedition()}})
+
+        with patch.object(adv, "PLAYER_DATA_PATH", str(data_path)):
+            assert adv.claim_active_expedition(123) is not None
+            assert adv.claim_active_expedition(123) is None
+
+    def test_claim_without_player_record_returns_none(self, tmp_path):
+        data_path = tmp_path / "player_data.json"
+        _write_json(data_path, {})
+
+        with patch.object(adv, "PLAYER_DATA_PATH", str(data_path)):
+            assert adv.claim_active_expedition(123) is None
+
+
+class TestFinishExpedition:
+    """Тесты расчёта итогов экспедиции"""
+
+    def _setup_paths(self, tmp_path, monkeypatch, player, locations, mobs):
+        data_path = tmp_path / "player_data.json"
+        _write_json(data_path, {"123": player})
+        monkeypatch.setattr(adv, "PLAYER_DATA_PATH", str(data_path))
+
+        loc_path = tmp_path / "locations.json"
+        _write_json(loc_path, locations)
+        monkeypatch.setattr(adv, "LOCATIONS_PATH", str(loc_path))
+
+        mobs_path = tmp_path / "mobs.json"
+        _write_json(mobs_path, mobs)
+        monkeypatch.setattr(adv, "MOBS_PATH", str(mobs_path))
+
+        return data_path
+
+    def _read_player(self, data_path):
+        import json as json_mod
+        with open(data_path, encoding="utf-8") as f:
+            return json_mod.load(f)["123"]
+
+    def test_finish_without_active_expedition_returns_none(self, tmp_path, monkeypatch):
+        data_path = self._setup_paths(
+            tmp_path, monkeypatch,
+            {"hp": 200, "max_hp": 200, "active_expedition": None},
+            EMPTY_LOCATIONS, EMPTY_MOBS,
+        )
+        assert adv.finish_expedition(123) is None
+        assert self._read_player(data_path)["active_expedition"] is None
+
+    def test_finish_completes_expedition_once(self, tmp_path, monkeypatch):
+        player = {
+            "hp": 200, "max_hp": 200, "lvl": 1, "xp": 0,
+            "inventory": [], "active_expedition": _make_expedition(),
+        }
+        data_path = self._setup_paths(tmp_path, monkeypatch, player, EMPTY_LOCATIONS, EMPTY_MOBS)
+        monkeypatch.setattr(adv, "random", FakeRandom(random_value=0.995))  # без стычки
+
+        result = adv.finish_expedition(123)
+        assert result is not None
+        assert result["loc_id"] == "test_loc"
+        assert result["username"] == "tester"
+        assert result["chat_id"] == 42
+        assert "Итоги экспедиции" in result["text"]
+
+        stored = self._read_player(data_path)
+        assert stored["active_expedition"] is None
+        assert stored["total_expeditions"] == 1
+        assert stored["total_fights"] == 0
+
+        # Повторный вызов не даёт наград дважды.
+        assert adv.finish_expedition(123) is None
+        assert self._read_player(data_path)["total_expeditions"] == 1
+
+    def test_finish_boss_victory_gives_loot_and_bonus_xp(self, tmp_path, monkeypatch):
+        player = {
+            "hp": 200, "max_hp": 200, "lvl": 1, "xp": 0,
+            "inventory": [], "active_expedition": _make_expedition(),
+        }
+        data_path = self._setup_paths(tmp_path, monkeypatch, player, BOSS_LOCATIONS, EMPTY_MOBS)
+        monkeypatch.setattr(adv, "random", FakeRandom(random_value=0.0))
+
+        result = adv.finish_expedition(123)
+        assert result is not None
+        assert "👑" in result["text"]
+        assert "Трофей босса" in result["text"]
+
+        stored = self._read_player(data_path)
+        # 10 за победу + 25 base_reward босса
+        assert stored["xp"] == 35
+        assert stored["wins"] == 1
+        assert stored["total_fights"] == 1
+        assert any(item["name"] == "👑 Трофей босса" for item in stored["inventory"])
+
+    def test_finish_levels_up_player(self, tmp_path, monkeypatch):
+        player = {
+            "hp": 200, "max_hp": 200, "lvl": 1, "xp": 95,
+            "inventory": [], "active_expedition": _make_expedition(),
+        }
+        data_path = self._setup_paths(tmp_path, monkeypatch, player, BOSS_LOCATIONS, EMPTY_MOBS)
+        monkeypatch.setattr(adv, "random", FakeRandom(random_value=0.0))
+
+        result = adv.finish_expedition(123)
+        assert "НОВЫЙ УРОВЕНЬ" in result["text"]
+
+        stored = self._read_player(data_path)
+        # 95 + 35 = 130; порог 100 -> уровень 2, остаток 30
+        assert stored["lvl"] == 2
+        assert stored["xp"] == 30
+        assert stored["max_hp"] == 220

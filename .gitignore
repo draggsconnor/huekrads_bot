@@ -1,9 +1,11 @@
 # Секреты и конфиги
 .env
 
-# База данных
+# База данных и прогресс игроков
 *.db
 bot_database.db
+persist/*
+!persist/.gitkeep
 
 # Экспорт истории чата
 data/result.json

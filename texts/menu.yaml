@@ -1,0 +1,13 @@
+commands:
+  adventure: "Экспедиции"
+  adventure_stats: "Статистика экспедиции"
+  adventure_inventory: "Инвентарь экспедиции"
+  start: "Запустить бота"
+  help: "Справка"
+
+help_text: |
+  🗺️ Экспедиции HueKrads
+
+  /adventure — выбрать локацию и отправить гнома
+  /adventure_stats — статистика
+  /adventure_inventory — инвентарь

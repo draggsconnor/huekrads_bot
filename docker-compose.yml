@@ -1,0 +1,8 @@
+services:
+  bot:
+    build: .
+    container_name: huekrads
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ./persist:/app/persist

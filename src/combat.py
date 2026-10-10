@@ -6,7 +6,7 @@ import random
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
-from .config import MONSTERS, XP_REWARDS
+from .config import ITEMS, MONSTERS, XP_REWARDS
 from .models import FightData, FightType, Player
 from .storage import Storage
 from .utils import r2
@@ -125,8 +125,6 @@ async def cb_fight_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         # С небольшим шансом — лут
         loot = None
         if random.random() < 0.3:
-            from .config import ITEMS
-
             loot = random.choice(ITEMS)
             player.inventory.append(loot["key"])
             log_lines.append(f"🎁 Трофей: {loot['name']}")

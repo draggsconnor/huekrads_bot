@@ -330,3 +330,38 @@ adventure_stats_expeditions_fail: "  💀 Проваленных: {failed}"
 adventure_stats_inventory_title: "🎒 Предметы:"
 adventure_stats_no_inventory: "Нет предметов"
 adventure_stats_inventory_item: "  • {name}: {count} шт."
+
+# Buttons
+button_start_expedition: "🚀 Отправиться в экспедицию"
+button_cancel_expedition: "❌ Вернуть из экспедиции досрочно"
+button_back_to_locations: "◀️ Назад к локациям"
+
+# Misc statuses
+unknown_location: "❌ Неизвестная локация!"
+unknown_location_name: "Неизвестно"
+unknown_mob: "Неизвестный моб"
+no_boss_data: "Нет данных"
+feature_deprecated: "⚠️ Этот функционал обновлён. Используйте экспедиции!"
+reward_hp: "❤️‍🩹 +{hp} HP"
+
+# Expedition flow states
+expedition_already_active: |
+  ⏳ Вы уже в экспедиции!
+  📍 Локация: {location}
+
+  Используйте кнопку «Вернуть из экспедиции», чтобы досрочно вернуться.
+expedition_in_progress: |
+  ⏳ <b>Гном в экспедиции:</b>
+  📍 {location}
+  ⏱️ Осталось: {minutes} мин. {seconds} сек.
+expedition_returned_early: |
+  ✅ <b>Гном возвращён из экспедиции!</b>
+  Осталось времени: {minutes} мин.
+
+# Boss encounters
+boss_killed: "  • 👑 {mob_name} повержен"
+boss_killed_f: "  • 👑 {mob_name} повержена"
+boss_killed_n: "  • 👑 {mob_name} повержено"
+boss_survived: "  • 👑 {mob_name} убежал"
+boss_survived_f: "  • 👑 {mob_name} убежала"
+boss_survived_n: "  • 👑 {mob_name} убежало"
