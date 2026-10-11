@@ -28,6 +28,7 @@
         "crit_chance": 0.25,
         "base_reward": 25,
         "encounter_chance": 0.05,
+        "battle": {"win_hits": 3, "dmg_per_hit": 50},
         "special_ability": "steal_item",
         "loot": [
           {
@@ -117,6 +118,7 @@
         "crit_chance": 0.10,
         "base_reward": 50,
         "encounter_chance": 0.35,
+        "battle": {"win_hits": 3, "dmg_per_hit": 60},
         "special_ability": "stone_skin",
         "loot": [
           {
@@ -146,6 +148,7 @@
         "crit_chance": 0.20,
         "base_reward": 35,
         "encounter_chance": 0.25,
+        "battle": {"win_hits": 2, "dmg_per_hit": 50},
         "special_ability": "fireball",
         "loot": [
           {
@@ -220,6 +223,7 @@
         "crit_chance": 0.30,
         "base_reward": 150,
         "encounter_chance": 0.25,
+        "battle": {"win_hits": 3, "dmg_per_hit": 60},
         "special_ability": "fire_breath",
         "loot": [
           {
@@ -249,6 +253,7 @@
         "crit_chance": 0.15,
         "base_reward": 20,
         "encounter_chance": 0.3,
+        "battle": {"win_hits": 2, "dmg_per_hit": 45},
         "special_ability": "fire_spit",
         "loot": [
           {

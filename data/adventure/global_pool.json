@@ -71,5 +71,23 @@
       "base_reward": 12,
       "encounter_chance": 0.3
     }
-  ]
+  ],
+  "items": {
+    "herb": {"name": "🌿 Трава"},
+    "stone": {"name": "🪨 Камень"},
+    "wood": {"name": "🪵 Деревяшка"},
+    "leather": {"name": "🥾 Кожа"},
+    "magic_crystal": {"name": "🔮 Магический кристалл"},
+    "enchanted_ore": {"name": "✨ Зачарованная руда"},
+    "rare_herb": {"name": "🌸 Редкая трава"},
+    "monster_part": {"name": "🦴 Часть монстра"},
+    "ancient_relic": {"name": "🏺 Древний артефакт"},
+    "dragon_scale": {"name": "🐉 Чешуя дракона"},
+    "elemental_core": {"name": "🔥 Элементальное ядро"},
+    "cursed_gem": {"name": "💜 Проклятый самоцвет"},
+    "boss_token": {"name": "🎖️ Токен босса"},
+    "legendary_weapon": {"name": "⚔️ Легендарное оружие"},
+    "ancient_armor": {"name": "🛡️ Древняя броня"},
+    "unique_trinket": {"name": "🎪 Уникальный тринкет"}
+  }
 }

@@ -89,115 +89,6 @@ def mock_mobs():
     }
 
 
-class TestResolveEncounterFight:
-    """Тесты боевой системы энкаунтеров"""
-
-    def test_player_wins_against_weak_mob(self, mock_player_basic):
-        mob = {
-            "name": "Слабый куст",
-            "hp": 15,
-            "dmg": 3,
-            "level": 1,
-            "tactics": {}
-        }
-        result = adv._resolve_encounter_fight(200, 200, mob)
-        
-        assert result["winner"] in ["player", "mob", "draw"]
-        assert "rounds" in result
-        assert len(result["rounds"]) > 0
-        assert result["mob_name"] == "Слабый куст"
-
-    def test_mob_wins_when_player_low_hp(self, mock_player_basic):
-        mob = {
-            "name": "Сильный моб",
-            "hp": 100,
-            "dmg": 50,
-            "crit_chance": 0.5,
-            "level": 5,
-            "tactics": {}
-        }
-        result = adv._resolve_encounter_fight(10, 200, mob)
-        
-        assert result["rounds"]
-        assert result["mob_name"] == "Сильный моб"
-
-    def test_bush_debuff_mechanic(self, mock_player_basic):
-        """Тест дебаффа 'Паранойя' от куста"""
-        mob = {
-            "name": "🌳Куст с предъявами",
-            "hp": 30,
-            "dmg": 5,
-            "level": 1,
-            "tactics": {"debuff_chance": 0.3}
-        }
-        
-        # Многоразовый тест чтобы убедиться что дебафф иногда срабатывает
-        results_with_debuff = 0
-        for _ in range(20):
-            result = adv._resolve_encounter_fight(200, 200, mob)
-            # Проверка что бой вообще работает
-            assert result["rounds"]
-            # Дебафф может не сработать из-за рандома, поэтому не asserted напрямую
-        # Тест просто проверяет что система работает
-
-    def test_overpower_mechanic(self, mock_player_basic):
-        """Тест спецспособности overpower (Голова деда на паучьих ногах)"""
-        mob = {
-            "name": "Голова деда на паучьих ногах",
-            "hp": 50,
-            "dmg": 5,
-            "level": 1,
-            "tactics": {"overpower": True}
-        }
-        result = adv._resolve_encounter_fight(200, 200, mob)
-        
-        assert result["rounds"]
-        assert result["mob_name"] == "Голова деда на паучьих ногах"
-
-    def test_max_rounds_limit(self, mock_player_basic):
-        """Тест что бой не длится вечность"""
-        mob = {
-            "name": "Неубиваемый моб",
-            "hp": 10000,
-            "dmg": 1,
-            "level": 1,
-            "tactics": {}
-        }
-        result = adv._resolve_encounter_fight(200, 200, mob)
-        
-        assert len(result["rounds"]) <= 10
-        assert result["encounter_result"] == "mob_escaped"
-
-
-class TestRollLoot:
-    """Тесты системы дропа ресурсов"""
-
-    def test_roll_loot_respects_chances(self):
-        loot_table = [
-            {"item_id": "common_item", "name": "Common", "chance": 1.0, "quantity_min": 1, "quantity_max": 1},
-            {"item_id": "rare_item", "name": "Rare", "chance": 0.0, "quantity_min": 1, "quantity_max": 1},
-        ]
-        
-        # common_item должен всегда выпадать, rare_item никогда
-        result = adv._roll_loot(loot_table)
-        
-        item_ids = [r["item_id"] for r in result]
-        assert "common_item" in item_ids
-        assert "rare_item" not in item_ids
-
-    def test_roll_loot_empty_table(self):
-        result = adv._roll_loot([])
-        assert result == []
-
-    def test_roll_loot_variable_quantity(self):
-        loot_table = [
-            {"item_id": "item", "name": "Item", "chance": 1.0, "quantity_min": 2, "quantity_max": 5},
-        ]
-        
-        result = adv._roll_loot(loot_table)
-        assert len(result) == 1
-        assert 2 <= result[0]["quantity"] <= 5
-
 
 class TestFormatResource:
     """Тесты форматирования ресурсов"""
@@ -279,22 +170,6 @@ class TestLoaders:
             assert "dark_forest" in mobs["specific_mobs"]
 
 
-class FakeRandom:
-    """Детерминированная замена random для тестов finish_expedition."""
-
-    def __init__(self, random_value=0.0):
-        self.random_value = random_value
-
-    def random(self):
-        return self.random_value
-
-    def choice(self, seq):
-        return seq[0]  # всегда первый вариант: "attack"
-
-    def randint(self, a, b):
-        return a  # минимальные броски
-
-
 def _write_json(path, data):
     import json
     with open(path, "w", encoding="utf-8") as f:
@@ -325,34 +200,6 @@ EMPTY_LOCATIONS = {
         "resources": [],
         "bosses": [],
         "requirements": {"min_level": 1},
-    }
-}
-BOSS_LOCATIONS = {
-    "test_loc": {
-        "id": "test_loc",
-        "name": "Тестовая локация",
-        "resources": [],
-        "requirements": {"min_level": 1},
-        "bosses": [
-            {
-                "id": "test_boss",
-                "name": "Тестовый Босс",
-                "hp": 5,
-                "attack": 1,
-                "crit_chance": 0.05,
-                "encounter_chance": 1.0,
-                "base_reward": 25,
-                "loot": [
-                    {
-                        "item_id": "boss_trophy",
-                        "name": "👑 Трофей босса",
-                        "quantity_min": 1,
-                        "quantity_max": 1,
-                        "chance": 1.0,
-                    }
-                ],
-            }
-        ],
     }
 }
 
@@ -429,7 +276,6 @@ class TestFinishExpedition:
             "inventory": [], "active_expedition": _make_expedition(),
         }
         data_path = self._setup_paths(tmp_path, monkeypatch, player, EMPTY_LOCATIONS, EMPTY_MOBS)
-        monkeypatch.setattr(adv, "random", FakeRandom(random_value=0.995))  # без стычки
 
         result = adv.finish_expedition(123)
         assert result is not None
@@ -437,6 +283,8 @@ class TestFinishExpedition:
         assert result["username"] == "tester"
         assert result["chat_id"] == 42
         assert "Итоги экспедиции" in result["text"]
+        # Без боёв в журнале — тихий путь.
+        assert "Путь был тихим" in result["text"]
 
         stored = self._read_player(data_path)
         assert stored["active_expedition"] is None
@@ -447,39 +295,39 @@ class TestFinishExpedition:
         assert adv.finish_expedition(123) is None
         assert self._read_player(data_path)["total_expeditions"] == 1
 
-    def test_finish_boss_victory_gives_loot_and_bonus_xp(self, tmp_path, monkeypatch):
+    def test_finish_renders_battle_log(self, tmp_path, monkeypatch):
+        expedition = _make_expedition()
+        expedition["battle_log"] = [
+            {
+                "enemy": "Древесный слизень",
+                "result": "victory",
+                "rounds": 3,
+                "xp": 10,
+                "item": "🪨 Камень",
+            }
+        ]
         player = {
-            "hp": 200, "max_hp": 200, "lvl": 1, "xp": 0,
-            "inventory": [], "active_expedition": _make_expedition(),
+            "hp": 200, "max_hp": 200, "lvl": 1, "xp": 10,
+            "inventory": [], "active_expedition": expedition,
         }
-        data_path = self._setup_paths(tmp_path, monkeypatch, player, BOSS_LOCATIONS, EMPTY_MOBS)
-        monkeypatch.setattr(adv, "random", FakeRandom(random_value=0.0))
+        data_path = self._setup_paths(tmp_path, monkeypatch, player, EMPTY_LOCATIONS, EMPTY_MOBS)
 
         result = adv.finish_expedition(123)
-        assert result is not None
-        assert "👑" in result["text"]
-        assert "Трофей босса" in result["text"]
-
-        stored = self._read_player(data_path)
-        # 10 за победу + 25 base_reward босса
-        assert stored["xp"] == 35
-        assert stored["wins"] == 1
-        assert stored["total_fights"] == 1
-        assert any(item["name"] == "👑 Трофей босса" for item in stored["inventory"])
+        assert "Древесный слизень повержен за 3 раунда" in result["text"]
+        assert "+10 XP" in result["text"]
 
     def test_finish_levels_up_player(self, tmp_path, monkeypatch):
         player = {
-            "hp": 200, "max_hp": 200, "lvl": 1, "xp": 95,
+            "hp": 200, "max_hp": 200, "lvl": 1, "xp": 130,
             "inventory": [], "active_expedition": _make_expedition(),
         }
-        data_path = self._setup_paths(tmp_path, monkeypatch, player, BOSS_LOCATIONS, EMPTY_MOBS)
-        monkeypatch.setattr(adv, "random", FakeRandom(random_value=0.0))
+        data_path = self._setup_paths(tmp_path, monkeypatch, player, EMPTY_LOCATIONS, EMPTY_MOBS)
 
         result = adv.finish_expedition(123)
         assert "НОВЫЙ УРОВЕНЬ" in result["text"]
 
         stored = self._read_player(data_path)
-        # 95 + 35 = 130; порог 100 -> уровень 2, остаток 30
+        # 130 XP: порог 100 -> уровень 2, остаток 30
         assert stored["lvl"] == 2
         assert stored["xp"] == 30
         assert stored["max_hp"] == 220

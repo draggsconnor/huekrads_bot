@@ -162,6 +162,66 @@ def _xp_for_next_level(level: int) -> int:
     return 50 + level * 50
 
 
+def _apply_level_ups(player: dict[str, Any]) -> bool:
+    """Spend XP on levels: each level adds +20 max HP and heals +20.
+
+    Mutates the player dict in place; returns True when at least one level
+    was gained.
+    """
+    leveled_up = False
+    while player.get("xp", 0) >= _xp_for_next_level(player.get("lvl", 1)):
+        player["xp"] = player.get("xp", 0) - _xp_for_next_level(player.get("lvl", 1))
+        player["lvl"] = player.get("lvl", 1) + 1
+        player["max_hp"] = 200 + (player["lvl"] - 1) * 20
+        player["hp"] = min(player["max_hp"], player.get("hp", 200) + 20)
+        leveled_up = True
+    return leveled_up
+
+
+def _ru_plural(n: int, one: str, few: str, many: str) -> str:
+    """Русская форма множественного числа: 1 раунд / 2 раунда / 5 раундов."""
+    n = abs(int(n)) % 100
+    if 11 <= n <= 14:
+        return many
+    n %= 10
+    if n == 1:
+        return one
+    if 2 <= n <= 4:
+        return few
+    return many
+
+
+def _render_battle_log(battle_log: list[dict[str, Any]]) -> list[str]:
+    """Lines describing the expedition's battles for the final report."""
+    lines = []
+    for entry in battle_log:
+        if entry.get("result") != "victory":
+            continue
+        enemy = entry.get("enemy") or _get_text("adventure.unknown_mob")
+        rounds = int(entry.get("rounds", 0) or 0)
+        gender = _get_mob_gender(enemy)
+        key = {2: "battle.report_defeated_f", 3: "battle.report_defeated_n"}.get(
+            gender, "battle.report_defeated"
+        )
+        line = _get_text(
+            key,
+            mob_name=enemy,
+            rounds=rounds,
+            rounds_word=_ru_plural(rounds, "раунд", "раунда", "раундов"),
+        )
+        extras = []
+        if entry.get("xp"):
+            extras.append(_get_text("battle.report_xp", xp=entry["xp"]))
+        if entry.get("item"):
+            extras.append(_get_text("battle.report_item", item=entry["item"]))
+        if extras:
+            line += " (" + ", ".join(extras) + ")"
+        lines.append(line)
+    if not lines:
+        lines.append(_get_text("battle.quiet_path"))
+    return lines
+
+
 def _expedition_job_name(user_id: int) -> str:
     """JobQueue name for the user's scheduled expedition completion."""
     return f"expedition_{user_id}"
@@ -185,283 +245,6 @@ def claim_active_expedition(user_id: int) -> dict[str, Any] | None:
         player["active_expedition"] = None
         save_player_data(data)
         return expedition
-
-
-def _roll_damage(base: int, variance: int = 3) -> int:
-    return max(1, base + random.randint(-variance, variance))
-
-
-# ---------------------------------------------------------------------------
-# Combat system (from duel mechanics with zones and blocks)
-# ---------------------------------------------------------------------------
-
-def _resolve_encounter_fight(player_hp: int, player_max_hp: int, mob: dict[str, Any], player_level: int = 1) -> dict[str, Any]:
-    """
-    Turn-based fight for encounters. Uses zones and blocks.
-    Returns dict with winner ('player' | 'mob'), player_hp_left, mob_hp_left,
-    rounds list and encounter_result.
-    """
-    mob_hp = mob.get("hp", 30)
-    mob_name = mob.get("name", "Моб")
-    mob_dmg_base = mob.get("dmg", 5)
-    mob_level = mob.get("level", 1)
-    mob_tactics = mob.get("tactics", {})
-    mob_debuff_chance = mob_tactics.get("debuff_chance", 0)
-    mob_has_overpower = mob_tactics.get("overpower", False)  # like head_on_spider_legs
-    
-    player_max = player_max_hp
-    current_player_hp = player_hp
-    current_mob_hp = mob_hp
-    rounds = []
-    player_debuffed = False  # "Паранойя" debuff
-    overpower_stacks = 0
-    
-    max_rounds = 10
-    
-    for r in range(1, max_rounds + 1):
-        round_data = {"round": r}
-        
-        # Player's turn
-        player_action = random.choice(["attack", "attack", "block"])  # 66% attack, 33% block
-        if player_action == "block":
-            round_data["player_action"] = "block"
-            damage_reduction = 0.5
-        else:
-            round_data["player_action"] = "attack"
-            damage_reduction = 1.0
-        
-        # Player attacks mob
-        if player_action != "block":
-            dmg_to_mob = _roll_damage(10 + 2 * max(1, player_level - 1), 3)
-            current_mob_hp -= dmg_to_mob
-            round_data["player_dmg"] = dmg_to_mob
-        else:
-            round_data["player_dmg"] = 0
-        
-        # Mob's turn
-        if player_debuffed and random.random() < 0.3:
-            # Player is stunned by paranoia
-            round_data["player_stunned"] = True
-            player_debuffed = False
-        else:
-            # Mob attacks player
-            is_crit = random.random() < mob.get("crit_chance", 0.1)
-            base_dmg = mob_dmg_base if not is_crit else mob_dmg_base * 2
-            dmg_to_player = _roll_damage(int(base_dmg), 2)
-            dmg_to_player = int(dmg_to_player * damage_reduction)
-            current_player_hp -= dmg_to_player
-            
-            round_data["mob_dmg"] = dmg_to_player
-            round_data["mob_crit"] = is_crit
-        
-        # Check for overpower (head_on_spider_legs special)
-        if mob_has_overpower and mob_hp - current_mob_hp >= 15:
-            overpower_stacks += 1
-            if overpower_stacks >= 3:
-                # Extra damage
-                current_player_hp -= 5
-                round_data["overpower_damage"] = 5
-        
-        rounds.append({
-            "round": r,
-            "player_action": round_data.get("player_action"),
-            "player_dmg": round_data.get("player_dmg", 0),
-            "mob_dmg": round_data.get("mob_dmg", 0),
-            "player_hp": max(0, current_player_hp),
-            "mob_hp": max(0, current_mob_hp),
-            "player_stunned": round_data.get("player_stunned", False),
-        })
-        
-        # Check debuff chance (bush_with_requirements)
-        if mob_debuff_chance > 0 and random.random() < mob_debuff_chance:
-            player_debuffed = True
-            round_data["player_debuff"] = True
-        
-        if current_mob_hp <= 0:
-            return {
-                "winner": "player",
-                "player_hp_left": max(0, current_player_hp),
-                "mob_hp_left": 0,
-                "rounds": rounds,
-                "mob_name": mob_name,
-                "encounter_result": "victory",
-            }
-        if current_player_hp <= 0:
-            return {
-                "winner": "mob",
-                "player_hp_left": 0,
-                "mob_hp_left": max(0, current_mob_hp),
-                "rounds": rounds,
-                "mob_name": mob_name,
-                "encounter_result": "defeat",
-            }
-    
-    # Draw -> mob escapes
-    return {
-        "winner": "draw",
-        "player_hp_left": max(0, current_player_hp),
-        "mob_hp_left": max(0, current_mob_hp),
-        "rounds": rounds,
-        "mob_name": mob_name,
-        "encounter_result": "mob_escaped",
-    }
-
-
-# ---------------------------------------------------------------------------
-# Loot helpers
-# ---------------------------------------------------------------------------
-
-def _roll_loot(loot_table: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    won = []
-    for entry in loot_table:
-        chance = entry.get("chance", 0.0)
-        qty_min = entry.get("quantity_min", 1)
-        qty_max = entry.get("quantity_max", 1)
-        if random.random() < chance:
-            qty = random.randint(qty_min, qty_max)
-            won.append({**entry, "quantity": qty})
-    return won
-
-
-def _format_loot(loot: list[dict[str, Any]], pool: dict[str, Any]) -> str:
-    lines = []
-    for item in loot:
-        item_id = item.get("item_id") or item.get("id")
-        name = item.get("name")
-        if not name and item_id and "items" in pool:
-            name = pool["items"].get(item_id, {}).get("name", item_id)
-        qty = item.get("quantity", 1)
-        lines.append(f"• {name or item_id} x{qty}")
-    return "\n".join(lines) if lines else get_text("adventure.no_loot")
-
-
-# ---------------------------------------------------------------------------
-# Expedition helpers
-# ---------------------------------------------------------------------------
-
-def _select_encounter_mob(loc_id: str, mobs_data: dict[str, Any], locations: dict[str, Any] | None = None) -> tuple[dict[str, Any], str | None]:
-    """Select a random mob based on encounter_chance for the location.
-    
-    Returns tuple of (mob_data, mob_description) where:
-    - mob_data: dict with mob stats for combat
-    - mob_description: formatted description text from adventure.yaml
-    """
-    mob_name_text_key = None
-    mob_desc_text_key = None
-    
-    if locations:
-        loc = locations.get(loc_id, {})
-        # Get specific_mobs as list of mob IDs from location
-        specific_mob_ids = loc.get("specific_mobs", [])
-        
-        if specific_mob_ids:
-            # Build weighted pool from specific mob IDs
-            weighted_pool = []
-            for mob_id in specific_mob_ids:
-                mob_def = mobs_data.get("mobs", {}).get(mob_id, {})
-                if mob_def:
-                    encounter_chance = mob_def.get("encounter_chance", 1)
-                    weighted_pool.append((mob_id, mob_def, encounter_chance))
-            
-            if weighted_pool:
-                # Select mob based on weights
-                total_weight = sum(w[2] for w in weighted_pool)
-                rand = random.random() * total_weight
-                cumulative = 0
-                for mob_id, mob_def, weight in weighted_pool:
-                    cumulative += weight
-                    if rand <= cumulative:
-                        # Return mob with its name and desc text keys
-                        mob_name_text_key = f"{mob_id}_name"
-                        mob_desc_text_key = f"{mob_id}_desc"
-                        
-                        mob_tactics = mob_def.get("tactics", {})
-                        return (
-                            {
-                                "id": mob_id,
-                                "name": mob_def.get("display_name", mob_id),
-                                "hp": mob_def.get("hp", 30),
-                                "max_hp": mob_def.get("hp", 30),
-                                "attack": mob_def.get("attack", 5),
-                                "defense": mob_def.get("defense", 1),
-                                "speed": mob_def.get("speed", 3),
-                                "crit_chance": mob_def.get("crit_chance", 0.0),
-                                "dmg": mob_def.get("attack", 5),  # dmg from attack
-                                "level": mob_def.get("min_level", 1),
-                                "tactics": mob_tactics,
-                                "special_ability": mob_def.get("special_ability"),
-                                "debuff_chance": mob_tactics.get("debuff_chance", 0),
-                                "overpower": mob_tactics.get("overpower", False),
-                                "has_suck_ability": mob_id == "head_on_spider_legs",  # special for head mob
-                                "turns_to_kill": mob_def.get("turns_to_kill", 3),  # for head_on_spider_legs
-                            },
-                            mob_desc_text_key
-                        )
-    
-    # Fallback to generic mob generation if no specific mobs
-    mob_types = mobs_data.get("mob_types", {})
-    encounter_weights = mobs_data.get("encounter_weights", {})
-    
-    # Select rarity based on weights
-    rand = random.random()
-    rarity = "common"
-    cumulative = 0
-    for r, weight in encounter_weights.items():
-        cumulative += weight
-        if rand < cumulative:
-            rarity = r
-            break
-    
-    rarity_data = mob_types.get(rarity, {}).get("stats", {})
-    if not rarity_data:
-        return None, None
-    
-    # Generate random mob
-    names = mob_types.get(rarity, {}).get("names", {}).get(loc_id, [f"{rarity.capitalize()} Mob"])
-    name = random.choice(names)
-    
-    return (
-        {
-            "name": name,
-            "hp": random.randint(rarity_data.get("hp", {}).get("min", 20), rarity_data.get("hp", {}).get("max", 50)),
-            "attack": random.randint(rarity_data.get("attack", {}).get("min", 5), rarity_data.get("attack", {}).get("max", 10)),
-            "defense": random.randint(rarity_data.get("defense", {}).get("min", 1), rarity_data.get("defense", {}).get("max", 3)),
-            "speed": random.randint(rarity_data.get("speed", {}).get("min", 1), rarity_data.get("speed", {}).get("max", 5)),
-            "crit_chance": rarity_data.get("crit_chance", {}).get("min", 0.05),
-            "dmg": random.randint(rarity_data.get("attack", {}).get("min", 5), rarity_data.get("attack", {}).get("max", 10)),
-            "level": 1,
-            "tactics": {},
-            "debuff_chance": 0,
-            "overpower": False,
-            "has_suck_ability": False,
-            "turns_to_kill": 3,
-        },
-        None
-    )
-
-
-def _select_boss(loc: dict[str, Any]) -> dict[str, Any] | None:
-    """Roll a boss encounter from the location's boss list (first hit wins).
-
-    Returns a mob-style dict for _resolve_encounter_fight plus boss loot data.
-    """
-    for boss in loc.get("bosses", []) or []:
-        try:
-            chance = float(boss.get("encounter_chance", 0) or 0)
-        except (TypeError, ValueError):
-            continue
-        if random.random() < chance:
-            return {
-                "name": boss.get("display_name", boss.get("name", _get_text("adventure.unknown_mob"))),
-                "hp": boss.get("hp", 100),
-                "dmg": boss.get("attack", 10),
-                "crit_chance": boss.get("crit_chance", 0.1),
-                "level": loc.get("level", 1),
-                "tactics": {},
-                "loot": boss.get("loot", []) or [],
-                "base_reward": boss.get("base_reward", 0),
-            }
-    return None
 
 
 def _format_resource(resource: dict[str, Any]) -> str:
@@ -530,7 +313,8 @@ def _get_mob_gendered_text(mob_name: str, text_key_base: str) -> str:
 async def _expedition_complete_callback(context: ContextTypes.DEFAULT_TYPE) -> None:
     """Callback function for job_queue when expedition completes.
     
-    Job data should contain: user_id, loc_id, username, chat_id
+    Job data must contain user_id; loc_id / username / chat_id are
+    optional and fall back to the stored expedition record.
     """
     job_data = context.job.data if context.job else None
     if not job_data:
@@ -542,12 +326,18 @@ async def _expedition_complete_callback(context: ContextTypes.DEFAULT_TYPE) -> N
     username = job_data.get("username")
     chat_id = job_data.get("chat_id")  # chat_id where expedition was started
     
-    if not user_id or not loc_id:
+    if not user_id:
         logger.error(f"Invalid job data: {job_data}")
         return
-    
+
     # Send expedition result
-    await send_expedition_result(user_id, loc_id, username, context, chat_id)
+    await send_expedition_result(
+        user_id,
+        job_data.get("loc_id"),
+        job_data.get("username"),
+        context,
+        job_data.get("chat_id"),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -724,6 +514,10 @@ async def adventure_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 seconds=expedition_info["remaining_seconds"],
             )
 
+        # Гном дерётся прямо сейчас
+        if player.get("active_battle"):
+            loc_text += "\n\n" + _get_text("battle.in_progress")
+
         await query.edit_message_text(
             loc_text,
             reply_markup=_location_details_keyboard(loc_id, has_active_expedition=has_active_expedition),
@@ -756,10 +550,19 @@ async def adventure_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             )
             return
 
-        # Снимаем запланированное завершение, если оно ещё в очереди.
+        # Снимаем запланированные джобы (завершение, энкаунтер, фаза боя)
+        # и прерываем бой, если он идёт.
+        from handlers.battle import abort_battle, battle_job_name, encounter_job_name
+
         if context.job_queue:
-            for job in context.job_queue.get_jobs_by_name(_expedition_job_name(user.id)):
-                job.schedule_removal()
+            for job_name in (
+                _expedition_job_name(user.id),
+                encounter_job_name(user.id),
+                battle_job_name(user.id),
+            ):
+                for job in context.job_queue.get_jobs_by_name(job_name):
+                    job.schedule_removal()
+        abort_battle(user.id)
 
         # Calculate elapsed time and refund
         start_dt = parse_expedition_time(expedition.get("start_time"))
@@ -838,6 +641,11 @@ async def adventure_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         expedition_start = datetime.now(timezone.utc)
         expedition_end = expedition_start + timedelta(seconds=duration_seconds)
 
+        # Энкаунтер: случайный момент внутри экспедиции (см. handlers/battle.py).
+        # Локальный импорт: battle импортирует этот модуль — разрываем цикл.
+        from handlers.battle import encounter_job_name, plan_encounter, trigger_encounter_job
+
+        encounter_delay = plan_encounter(loc, duration_seconds)
         expedition_data = {
             "location_id": loc_id,
             "location_name": loc.get("name", loc_id),
@@ -846,7 +654,12 @@ async def adventure_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             "duration_seconds": duration_seconds,
             "chat_id": chat_id,
             "username": user.username or user.first_name,
+            "encounter_scheduled": encounter_delay is not None,
         }
+        if encounter_delay is not None:
+            expedition_data["encounter_at"] = (
+                expedition_start + timedelta(seconds=encounter_delay)
+            ).isoformat()
 
         update_player(user.id, active_expedition=expedition_data)
         
@@ -872,7 +685,16 @@ async def adventure_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             name=_expedition_job_name(user.id),
             data={"user_id": user.id, "loc_id": loc_id, "username": user.username or user.first_name, "chat_id": chat_id}
         )
-        
+
+        # Случайный энкаунтер внутри таймера экспедиции.
+        if encounter_delay is not None:
+            context.job_queue.run_once(
+                trigger_encounter_job,
+                encounter_delay,
+                name=encounter_job_name(user.id),
+                data={"user_id": user.id},
+            )
+
         return
 
     # ------------------------------------------------------------------
@@ -898,6 +720,7 @@ def _ensure_player_defaults(player: dict[str, Any]) -> None:
     player.setdefault("total_fights", 0)
     player.setdefault("wins", 0)
     player.setdefault("active_expedition", None)
+    player.setdefault("active_battle", None)
 
 
 def _roll_resources(loc: dict[str, Any]) -> list[dict[str, Any]]:
@@ -917,11 +740,15 @@ def finish_expedition(
     loc_id: str | None = None,
     username: str | None = None,
 ) -> dict[str, Any] | None:
-    """Atomically claim and resolve the player's active expedition.
+    """Atomically claim the player's active expedition and settle it.
+
+    Interactive battles are resolved while the expedition runs (see
+    handlers/battle.py); here we only roll the location resources, apply
+    them, and render the final report from the expedition's battle log.
 
     The expedition is cleared and all rewards are applied in a single write,
     so whoever fires first (the timer job, the expiration checker or the
-    player's own click) is the only one to grant the rewards.
+    player's own click) is the only one to settle the expedition.
 
     Returns a dict with the result text and delivery info, or None when
     there was no active expedition to finish.
@@ -941,83 +768,22 @@ def finish_expedition(
         loc_id = loc_id or expedition.get("location_id")
         username = username or expedition.get("username") or _get_text("common.user.default_title")
         chat_id = expedition.get("chat_id")
+        battle_log = expedition.get("battle_log") or []
 
         locations = load_locations()
         loc = locations.get(loc_id, {})
-        mobs_data = load_mobs()
 
-        current_hp = player.get("hp", 200)
-        max_hp = player.get("max_hp", 200)
-        player_level = player.get("lvl", 1)
-
-        # 1) Resources from the location's drop table.
+        # Resources from the location's drop table (battles already paid
+        # out their XP, loot and damage while the expedition ran).
         resources = _roll_resources(loc)
-
-        # 2) Encounter (99%): a location boss may replace the regular mob.
-        has_encounter = random.random() < 0.99
-        encounter_result = None
-        encounter_name = None
-        is_boss_fight = False
-        xp_gained = 0
-        hp_healed = 0
-        hp_after = current_hp
-
-        if has_encounter:
-            boss = _select_boss(loc)
-            fight_result = None
-            if boss is not None:
-                is_boss_fight = True
-                encounter_name = boss["name"]
-                fight_result = _resolve_encounter_fight(current_hp, max_hp, boss, player_level)
-            else:
-                mob, mob_desc_key = _select_encounter_mob(loc_id, mobs_data, locations)
-                if mob is not None:
-                    if mob_desc_key:
-                        encounter_name = _get_text(f"adventure.{mob_desc_key.replace('_desc', '_name')}")
-                    encounter_name = encounter_name or mob.get("name") or _get_text("adventure.unknown_mob")
-                    fight_result = _resolve_encounter_fight(current_hp, max_hp, mob, player_level)
-
-            if fight_result is not None:
-                encounter_result = fight_result["encounter_result"]
-                hp_after = fight_result["player_hp_left"]
-                if fight_result["winner"] == "player":
-                    xp_gained += 10
-                    if is_boss_fight:
-                        xp_gained += int(boss.get("base_reward", 0) or 0)
-                        for item in _roll_loot(boss.get("loot", []) or []):
-                            resources.append({
-                                "name": item.get("name") or item.get("item_id"),
-                                "quantity": item.get("quantity", 1),
-                            })
-                    hp_healed = min(20, max_hp - hp_after)
-                    hp_after += hp_healed
-                else:
-                    hp_after = max(1, hp_after - 5)
-
-        # 3) Apply the outcome in the same write that claimed the expedition.
-        new_hp = min(max_hp, hp_after)
-        player["hp"] = new_hp
-        player["xp"] = player.get("xp", 0) + xp_gained
         if resources:
             player["inventory"] = player.get("inventory", []) + resources
         player["total_expeditions"] = player.get("total_expeditions", 0) + 1
-        if encounter_result is not None:
-            player["total_fights"] = player.get("total_fights", 0) + 1
-            if encounter_result == "victory":
-                player["wins"] = player.get("wins", 0) + 1
-
-        # 4) Level-ups: leftover XP carries over, each level raises max HP.
-        leveled_up = False
-        while player["xp"] >= _xp_for_next_level(player.get("lvl", 1)):
-            player["xp"] -= _xp_for_next_level(player.get("lvl", 1))
-            player["lvl"] = player.get("lvl", 1) + 1
-            player["max_hp"] = 200 + (player["lvl"] - 1) * 20
-            player["hp"] = min(player["max_hp"], player["hp"] + 20)
-            leveled_up = True
+        leveled_up = _apply_level_ups(player)
 
         save_player_data(data)
 
-    # 5) Build the report (pure formatting, no store access).
+    # Build the report (pure formatting, no store access).
     result_lines = []
     if resources:
         res_list = "\n".join(_format_resource(r) for r in resources)
@@ -1025,23 +791,11 @@ def finish_expedition(
     else:
         result_lines.append(_get_text("adventure.expedition_no_resources"))
 
-    encounters_summary = []
-    if encounter_name:
-        killed_key = "boss_killed" if is_boss_fight else "mob_killed"
-        survived_key = "boss_survived" if is_boss_fight else "mob_survived"
-        if encounter_result == "victory":
-            encounters_summary.append(_get_mob_gendered_text(encounter_name, killed_key))
-            if xp_gained > 0:
-                encounters_summary.append(_get_text("adventure.reward_xp", xp=xp_gained))
-            if hp_healed > 0:
-                encounters_summary.append(_get_text("adventure.reward_hp", hp=hp_healed))
-        else:
-            # Поражение или ничья (враг сбежал) — враг уцелел.
-            encounters_summary.append(_get_mob_gendered_text(encounter_name, survived_key))
+    battle_lines = _render_battle_log(battle_log)
+    won_any = any(entry.get("result") == "victory" for entry in battle_log)
+    total_xp = sum(int(entry.get("xp", 0) or 0) for entry in battle_log)
 
-    if encounter_result == "defeat":
-        result_status = _get_text("adventure.expedition_result_fail")
-    elif encounter_result == "victory" or resources:
+    if resources or won_any:
         result_status = _get_text("adventure.expedition_result_success")
     else:
         result_status = _get_text("adventure.expedition_result_failure")
@@ -1051,9 +805,9 @@ def finish_expedition(
         username=username,
         hp=player["hp"],
         max_hp=player["max_hp"],
-        total_xp=xp_gained,
+        total_xp=total_xp,
         resources_summary="\n".join(result_lines),
-        encounters_summary="\n".join(encounters_summary) if encounters_summary else "",
+        encounters_summary="\n".join(battle_lines),
     )
 
     text = result_status + "\n\n" + summary_text
@@ -1157,7 +911,24 @@ async def send_expedition_result(user_id: int, loc_id: str | None, username: str
     Used by the job_queue completion callback and by the expiration checker.
     Safe to call multiple times: only the first caller resolves the
     expedition, later calls see no active expedition and do nothing.
+
+    If an interactive battle is still running, the completion waits for it:
+    the pending completion job is pushed back a minute and later calls retry.
     """
+    player = get_player(user_id)
+    if player.get("active_battle"):
+        logger.info("Defer expedition result for %s: battle in progress", user_id)
+        if context.job_queue:
+            for job in context.job_queue.get_jobs_by_name(_expedition_job_name(user_id)):
+                job.schedule_removal()
+            context.job_queue.run_once(
+                _expedition_complete_callback,
+                60,
+                name=_expedition_job_name(user_id),
+                data={"user_id": user_id},
+            )
+        return
+
     result = finish_expedition(user_id, loc_id, username)
     if result is None:
         logger.info("Skip expedition result for %s: no active expedition", user_id)

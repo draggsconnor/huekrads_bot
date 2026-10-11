@@ -17,6 +17,7 @@ from handlers.adventure import (
     adventure_stats_command,
 )
 from handlers.adventure_expiration_checker import expedition_expiration_job
+from handlers.battle import battle_callback, battle_watcher_job
 from handlers.utils import error_handler
 from text_resources import get_text
 
@@ -74,6 +75,12 @@ def main() -> None:
             first=15,
             name="expedition_expiration_job",
         )
+        application.job_queue.run_repeating(
+            battle_watcher_job,
+            interval=10,
+            first=10,
+            name="battle_watcher_job",
+        )
     else:
         logger.error(
             "JobQueue недоступен: экспедиции не закроются по таймеру. "
@@ -89,6 +96,12 @@ def main() -> None:
         CallbackQueryHandler(
             adventure_callback,
             pattern=r"^adv_",
+        )
+    )
+    application.add_handler(
+        CallbackQueryHandler(
+            battle_callback,
+            pattern=r"^advb_",
         )
     )
     application.add_error_handler(error_handler)

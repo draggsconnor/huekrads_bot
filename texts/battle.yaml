@@ -1,0 +1,78 @@
+# Interactive zone combat during expeditions
+
+# Zone button labels
+attack_buttons:
+  head: "🗡 Голова"
+  body: "🗡 Торс"
+  dick: "🗡 Хуй"
+
+block_buttons:
+  head: "🛡 Голова"
+  body: "🛡 Торс"
+  dick: "🛡 Хуй"
+
+# Zone names for the round journal
+zone_attack_names:
+  head: "в голову"
+  body: "в торс"
+  dick: "по хую"
+
+zone_block_names:
+  head: "голову"
+  body: "торс"
+  dick: "хуй"
+
+# Battle intro (first message)
+intro_title: "⚔️ <b>{username} столкнулся с врагом!</b>"
+intro_enemy: |
+  🧟 <b>{enemy}</b>
+  <i>{desc}</i>
+intro_enemy_plain: "🧟 <b>{enemy}</b>"
+intro_params: "🎯 Попаданий для победы: {win_hits} • 💥 Урон за неверный блок: {dmg}"
+
+# Recurring battle message
+message: |
+  ⚔️ <b>Бой: {enemy}</b>
+  {status}
+
+  {phase}
+
+status: "🎯 Попаданий: {hits}/{win_hits} • 💥 Получено урона: {dmg}"
+phase_attack: "🗡 <b>Раунд {round}</b> — выбери зону атаки (⏱ 10 сек):"
+phase_defense: "🛡 <b>Раунд {round}</b> — выбери зону блока (⏱ 10 сек):"
+
+# Callback answers
+stale: "Этот бой уже окончен."
+late: "Фаза уже прошла — выбор не принят."
+
+# Round journal lines
+round_hit_blocked: "• Р{round}: ⚔️ бил {attack} — ПОПАЛ; 🛡 закрыл {block} — отбился"
+round_hit_damaged: "• Р{round}: ⚔️ бил {attack} — ПОПАЛ; 💥 пропустил ответку ({dmg} HP)"
+round_miss_blocked: "• Р{round}: 🚫 бил {attack} — враг закрылся; 🛡 закрыл {block} — отбился"
+round_miss_damaged: "• Р{round}: 🚫 бил {attack} — враг закрылся; 💥 пропустил ответку ({dmg} HP)"
+
+# Victory report
+victory: "🏆 <b>{enemy} повержен за {rounds} {rounds_word}!</b>"
+victory_f: "🏆 <b>{enemy} повержена за {rounds} {rounds_word}!</b>"
+victory_n: "🏆 <b>{enemy} повержено за {rounds} {rounds_word}!</b>"
+victory_heal: "❤️‍🩹 Восстановлено после боя: +{hp} HP"
+reward_xp: "⭐ Опыт: +{xp}"
+reward_item: "🎒 Добыча: {item} x{count}"
+
+# Defeat report
+defeat: |
+  💀 <b>Гному надрали зад!</b>
+  {enemy} оказался сильнее — бой длился {rounds} {rounds_word}.
+defeat_loot: "🎒 Обронил по дороге: {item}"
+defeat_end: "🏃 Экспедиция прервана досрочно, без опыта. Гном еле дополз домой (1 HP)."
+
+# Lines for the expedition final report
+report_defeated: "  • {mob_name} повержен за {rounds} {rounds_word}"
+report_defeated_f: "  • {mob_name} повержена за {rounds} {rounds_word}"
+report_defeated_n: "  • {mob_name} повержено за {rounds} {rounds_word}"
+report_xp: "+{xp} XP"
+report_item: "предмет: {item}"
+quiet_path: "🦶 Путь был тихим — никого не встретил."
+
+# Location view note
+in_progress: "⚔️ Гном сейчас в бою!"
