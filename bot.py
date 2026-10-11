@@ -41,6 +41,8 @@ BOT_COMMANDS = [
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    # Уборка: сама команда игрока и ответ бота живут минуту.
+    await schedule_self_delete(context, update.effective_message)
     message = await update.effective_message.reply_text(get_text("menu.help_text"))
     await schedule_self_delete(context, message)
 

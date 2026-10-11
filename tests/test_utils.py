@@ -94,15 +94,15 @@ async def test_stats_reply_schedules_self_delete(fake_context, tmp_path, monkeyp
     reply = AsyncMock(return_value=SimpleNamespace(chat_id=-42, message_id=100))
     update = SimpleNamespace(
         effective_user=SimpleNamespace(id=1001, username="tester", first_name="Tester"),
-        effective_message=SimpleNamespace(reply_text=reply),
+        effective_message=SimpleNamespace(chat_id=-42, message_id=99, reply_text=reply),
     )
 
     await adventure.adventure_stats_command(update, fake_context)
 
     scheduled = _scheduled_self_delete(fake_context)
-    assert scheduled
-    assert scheduled[0][1] == 60  # задержка по умолчанию — минута
-    assert scheduled[0][2]["data"] == {"chat_id": -42, "message_id": 100}
+    entries = sorted((call[1], call[2]["data"]["message_id"]) for call in scheduled)
+    # Минута и на команду игрока, и на ответ бота.
+    assert entries == [(60, 99), (60, 100)]
 
 
 async def test_inventory_reply_schedules_self_delete(fake_context, tmp_path, monkeypatch):
@@ -116,25 +116,40 @@ async def test_inventory_reply_schedules_self_delete(fake_context, tmp_path, mon
     reply = AsyncMock(return_value=SimpleNamespace(chat_id=-42, message_id=101))
     update = SimpleNamespace(
         effective_user=SimpleNamespace(id=1001),
-        effective_message=SimpleNamespace(reply_text=reply),
+        effective_message=SimpleNamespace(chat_id=-42, message_id=100, reply_text=reply),
     )
 
     await adventure.adventure_inventory_command(update, fake_context)
 
     scheduled = _scheduled_self_delete(fake_context)
-    assert scheduled
-    assert scheduled[0][2]["data"] == {"chat_id": -42, "message_id": 101}
+    entries = sorted((call[1], call[2]["data"]["message_id"]) for call in scheduled)
+    assert entries == [(60, 100), (60, 101)]
 
 
 async def test_help_reply_schedules_self_delete(fake_context):
     import bot
 
     reply = AsyncMock(return_value=SimpleNamespace(chat_id=-42, message_id=102))
-    update = SimpleNamespace(effective_message=SimpleNamespace(reply_text=reply))
+    update = SimpleNamespace(
+        effective_message=SimpleNamespace(chat_id=-42, message_id=101, reply_text=reply),
+    )
 
     await bot.help_command(update, fake_context)
 
     scheduled = _scheduled_self_delete(fake_context)
-    assert scheduled
-    assert scheduled[0][2]["data"] == {"chat_id": -42, "message_id": 102}
+    entries = sorted((call[1], call[2]["data"]["message_id"]) for call in scheduled)
+    assert entries == [(60, 101), (60, 102)]
     reply.assert_awaited_once()
+
+
+async def test_self_delete_survives_missing_rights(fake_context, monkeypatch):
+    """Без админ-прав бот не может удалить чужое сообщение — но не падает."""
+    from handlers import utils
+
+    fake_context.job = SimpleNamespace(data={"chat_id": 42, "message_id": 101})
+    monkeypatch.setattr(utils, "is_auto_delete_enabled", lambda _chat_id: True)
+    fake_context.bot.delete_message = AsyncMock(side_effect=Exception("no rights"))
+
+    await utils.self_delete_job(fake_context)
+
+    fake_context.bot.delete_message.assert_awaited_once()

@@ -146,7 +146,12 @@ async def schedule_self_delete(
     message,
     delay_seconds: int = DEFAULT_DELETE_DELAY,
 ) -> None:
-    """Запланировать удаление отправленного бот-сообщения через delay секунд."""
+    """Запланировать удаление сообщения через delay секунд.
+
+    Подходит и для сообщений бота, и для команд игрока (для чужих сообщений
+    боту нужны права админа: без них удаление просто не сработает, error
+    пойдёт warning'ом и бот продолжит работу).
+    """
     if message is None or not context.job_queue:
         return
     context.job_queue.run_once(

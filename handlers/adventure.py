@@ -881,6 +881,8 @@ async def adventure_stats_command(update: Update, context: ContextTypes.DEFAULT_
     if failed > 0:
         stats_lines.append(_get_text("adventure.adventure_stats_expeditions_failed", failed=failed))
     
+    # Уборка: сама команда игрока и ответ бота живут минуту.
+    await schedule_self_delete(context, update.effective_message)
     message = await update.effective_message.reply_text(
         "\n".join(stats_lines),
         parse_mode=ParseMode.HTML
@@ -915,6 +917,8 @@ async def adventure_inventory_command(update: Update, context: ContextTypes.DEFA
     else:
         inventory_lines.append(_get_text("adventure.adventure_inventory_no_items"))
     
+    # Уборка: сама команда игрока и ответ бота живут минуту.
+    await schedule_self_delete(context, update.effective_message)
     message = await update.effective_message.reply_text(
         "\n".join(inventory_lines),
         parse_mode=ParseMode.HTML
