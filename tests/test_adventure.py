@@ -204,6 +204,18 @@ EMPTY_LOCATIONS = {
 }
 
 
+class TestLeadingEmoji:
+    def test_does_not_duplicate_first_letter(self):
+        # было: '🌲Охуенно тёмный лес'[:2] -> '🌲О' + 'Охуенно…' -> 'ООхуенно'
+        assert adv._leading_emoji("🌲Охуенно тёмный лес") == "🌲"
+
+    def test_keeps_variation_selector(self):
+        assert adv._leading_emoji("⛏️Заброшенная шахта") == "⛏️"
+
+    def test_fallback_for_missing_display_name(self):
+        assert adv._leading_emoji("") == "🌲"
+
+
 class TestClaimActiveExpedition:
     """Тесты атомарного захвата экспедиции"""
 

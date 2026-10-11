@@ -204,6 +204,8 @@
   "dragon_lair": {
     "id": "dragon_lair",
     "name": "Логово дракона",
+    "display_name": "🐉Логово дракона",
+    "full_description": "Опасное логово, где обитает древний дракон.",
     "description": "Опасное логово, где обитает древний дракон.",
     "difficulty": 3,
     "entry_cost": 25,

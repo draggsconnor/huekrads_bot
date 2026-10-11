@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import random
+import re
 import threading
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -373,6 +374,19 @@ def _location_details_keyboard(loc_id: str, has_active_expedition: bool = False)
     )
 
 
+_EMOJI_RE = re.compile(r"^(\S\uFE0F?)")
+
+
+def _leading_emoji(display_name: str) -> str:
+    """Первый знак эмодзи из display_name ('🌲Охуенно…' -> '🌲').
+
+    Срез [:2] захватывал эмодзи плюс первую букву названия и удваивал её
+    («ООхуенно», «ЗЗаброшенная»); вариантный селектор «⛏️» сохраняем.
+    """
+    match = _EMOJI_RE.match(display_name or "")
+    return match.group(1) if match else "🌲"
+
+
 def _format_rewards_text(loc: dict[str, Any]) -> str:
     """Human-readable list of the location's resources with drop chances."""
     rewards_text = _get_text("adventure.resources_loot", resources="—")
@@ -399,7 +413,7 @@ def _build_location_details_text(user, loc: dict[str, Any], loc_id: str) -> str:
     return _get_text(
         "adventure.location_detailed_info",
         username=user.username or user.first_name,
-        location_emoji=loc.get("display_name", "")[:2] if loc.get("display_name") else "🌲",
+        location_emoji=_leading_emoji(loc.get("display_name") or ""),
         location_name=loc.get("name", loc_id),
         location_description=loc.get("full_description", ""),
         min_level=_required_level(loc),
