@@ -18,7 +18,7 @@ from handlers.adventure import (
 )
 from handlers.adventure_expiration_checker import expedition_expiration_job
 from handlers.battle import battle_callback, battle_watcher_job
-from handlers.utils import error_handler
+from handlers.utils import error_handler, schedule_self_delete
 from text_resources import get_text
 
 logging.basicConfig(
@@ -41,7 +41,8 @@ BOT_COMMANDS = [
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await update.effective_message.reply_text(get_text("menu.help_text"))
+    message = await update.effective_message.reply_text(get_text("menu.help_text"))
+    await schedule_self_delete(context, message)
 
 
 async def post_init(application: Application) -> None:

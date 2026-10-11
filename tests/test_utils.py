@@ -1,6 +1,8 @@
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import json
+
 import pytest
 
 from text_resources import get_text, get_text_mapping
@@ -44,3 +46,95 @@ async def test_file_id_handler_uses_media_template(monkeypatch):
         "Photo file_id:\n<code>photo-id</code>",
         parse_mode="HTML",
     )
+
+
+# ---------------------------------------------------------------------
+# Самоочистка сообщений бота
+# ---------------------------------------------------------------------
+
+def _scheduled_self_delete(fake_context):
+    from handlers import utils
+
+    return [
+        call for call in fake_context.job_queue.calls
+        if call[0] is utils.self_delete_job
+    ]
+
+
+async def test_self_delete_job_deletes_message(fake_context, monkeypatch):
+    from handlers import utils
+
+    fake_context.job = SimpleNamespace(data={"chat_id": 42, "message_id": 101})
+    monkeypatch.setattr(utils, "is_auto_delete_enabled", lambda _chat_id: True)
+
+    await utils.self_delete_job(fake_context)
+
+    fake_context.bot.delete_message.assert_awaited_once_with(chat_id=42, message_id=101)
+
+
+async def test_self_delete_respects_chat_toggle(fake_context, monkeypatch):
+    from handlers import utils
+
+    fake_context.job = SimpleNamespace(data={"chat_id": 42, "message_id": 101})
+    monkeypatch.setattr(utils, "is_auto_delete_enabled", lambda _chat_id: False)
+
+    await utils.self_delete_job(fake_context)
+
+    fake_context.bot.delete_message.assert_not_awaited()
+
+
+async def test_stats_reply_schedules_self_delete(fake_context, tmp_path, monkeypatch):
+    import handlers.adventure as adventure
+    from handlers import utils
+
+    data_path = tmp_path / "player_data.json"
+    data_path.write_text(json.dumps({"1001": {"hp": 200, "max_hp": 200, "lvl": 1}}, ensure_ascii=False), encoding="utf-8")
+    monkeypatch.setattr(adventure, "PLAYER_DATA_PATH", str(data_path))
+
+    reply = AsyncMock(return_value=SimpleNamespace(chat_id=-42, message_id=100))
+    update = SimpleNamespace(
+        effective_user=SimpleNamespace(id=1001, username="tester", first_name="Tester"),
+        effective_message=SimpleNamespace(reply_text=reply),
+    )
+
+    await adventure.adventure_stats_command(update, fake_context)
+
+    scheduled = _scheduled_self_delete(fake_context)
+    assert scheduled
+    assert scheduled[0][1] == 60  # задержка по умолчанию — минута
+    assert scheduled[0][2]["data"] == {"chat_id": -42, "message_id": 100}
+
+
+async def test_inventory_reply_schedules_self_delete(fake_context, tmp_path, monkeypatch):
+    import handlers.adventure as adventure
+    from handlers import utils
+
+    data_path = tmp_path / "player_data.json"
+    data_path.write_text(json.dumps({"1001": {"hp": 200, "max_hp": 200, "lvl": 1}}, ensure_ascii=False), encoding="utf-8")
+    monkeypatch.setattr(adventure, "PLAYER_DATA_PATH", str(data_path))
+
+    reply = AsyncMock(return_value=SimpleNamespace(chat_id=-42, message_id=101))
+    update = SimpleNamespace(
+        effective_user=SimpleNamespace(id=1001),
+        effective_message=SimpleNamespace(reply_text=reply),
+    )
+
+    await adventure.adventure_inventory_command(update, fake_context)
+
+    scheduled = _scheduled_self_delete(fake_context)
+    assert scheduled
+    assert scheduled[0][2]["data"] == {"chat_id": -42, "message_id": 101}
+
+
+async def test_help_reply_schedules_self_delete(fake_context):
+    import bot
+
+    reply = AsyncMock(return_value=SimpleNamespace(chat_id=-42, message_id=102))
+    update = SimpleNamespace(effective_message=SimpleNamespace(reply_text=reply))
+
+    await bot.help_command(update, fake_context)
+
+    scheduled = _scheduled_self_delete(fake_context)
+    assert scheduled
+    assert scheduled[0][2]["data"] == {"chat_id": -42, "message_id": 102}
+    reply.assert_awaited_once()

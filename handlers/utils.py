@@ -109,3 +109,49 @@ async def get_file_id_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Глобальный обработчик ошибок."""
     logging.error("Исключение при обработке запроса:", exc_info=context.error)
+
+
+# ---------------------------------------------------------------------
+# Самоочистка сообщений бота
+# ---------------------------------------------------------------------
+
+DEFAULT_DELETE_DELAY = 60
+
+
+async def self_delete_job(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """JobQueue callback: удалить запомненное сообщение бота.
+
+    Учитывает пер-чат выключатель is_auto_delete_enabled (legacy-таблица
+    chat_settings, по умолчанию включено). Ошибки удаления (сообщение уже
+    удалено и т.п.) молча логируются.
+    """
+    data = context.job.data if context.job else None
+    if not data:
+        return
+    if not is_auto_delete_enabled(data["chat_id"]):
+        return
+    try:
+        await context.bot.delete_message(
+            chat_id=data["chat_id"], message_id=data["message_id"]
+        )
+    except Exception as e:
+        logging.warning(
+            "Не удалось удалить сообщение %s/%s: %s",
+            data["chat_id"], data["message_id"], e,
+        )
+
+
+async def schedule_self_delete(
+    context: ContextTypes.DEFAULT_TYPE,
+    message,
+    delay_seconds: int = DEFAULT_DELETE_DELAY,
+) -> None:
+    """Запланировать удаление отправленного бот-сообщения через delay секунд."""
+    if message is None or not context.job_queue:
+        return
+    context.job_queue.run_once(
+        self_delete_job,
+        delay_seconds,
+        name=f"self_delete_{message.chat_id}_{message.message_id}",
+        data={"chat_id": message.chat_id, "message_id": message.message_id},
+    )

@@ -21,6 +21,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes, CommandHandler
 from telegram.constants import ParseMode
 
+from handlers.utils import schedule_self_delete
 from text_resources import get_text, get_text_list
 
 logger = logging.getLogger(__name__)
@@ -880,10 +881,11 @@ async def adventure_stats_command(update: Update, context: ContextTypes.DEFAULT_
     if failed > 0:
         stats_lines.append(_get_text("adventure.adventure_stats_expeditions_failed", failed=failed))
     
-    await update.effective_message.reply_text(
+    message = await update.effective_message.reply_text(
         "\n".join(stats_lines),
         parse_mode=ParseMode.HTML
     )
+    await schedule_self_delete(context, message)
 
 
 async def adventure_inventory_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -913,10 +915,11 @@ async def adventure_inventory_command(update: Update, context: ContextTypes.DEFA
     else:
         inventory_lines.append(_get_text("adventure.adventure_inventory_no_items"))
     
-    await update.effective_message.reply_text(
+    message = await update.effective_message.reply_text(
         "\n".join(inventory_lines),
         parse_mode=ParseMode.HTML
     )
+    await schedule_self_delete(context, message)
 
 
 async def send_expedition_result(user_id: int, loc_id: str | None, username: str | None, context: ContextTypes.DEFAULT_TYPE, chat_id: int | None = None) -> None:
@@ -951,10 +954,13 @@ async def send_expedition_result(user_id: int, loc_id: str | None, username: str
     # Send the report to the chat where the expedition was started.
     target_chat_id = result.get("chat_id") or chat_id or user_id
     try:
-        await context.bot.send_message(
+        sent = await context.bot.send_message(
             chat_id=target_chat_id,
             text=result["text"],
             parse_mode='HTML'
         )
     except Exception as e:
         logger.error(f"Error sending expedition completion to chat {target_chat_id}: {e}")
+        return
+    # Отбивка по итогу экспедиции видна минуту, потом бот её убирает.
+    await schedule_self_delete(context, sent)
