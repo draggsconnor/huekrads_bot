@@ -32,7 +32,7 @@ intro_params: "🎯 Попаданий для победы: {win_hits} • 💥 
 
 # Recurring battle message
 message: |
-  ⚔️ <b>Бой: {enemy}</b>
+  ⚔️ <b>{username} против {enemy}</b>
   {status}
 
   {phase}
@@ -52,16 +52,16 @@ round_miss_blocked: "• Р{round}: 🚫 бил {attack} — враг закры
 round_miss_damaged: "• Р{round}: 🚫 бил {attack} — враг закрылся; 💥 пропустил ответку ({dmg} HP)"
 
 # Victory report
-victory: "🏆 <b>{enemy} повержен за {rounds} {rounds_word}!</b>"
-victory_f: "🏆 <b>{enemy} повержена за {rounds} {rounds_word}!</b>"
-victory_n: "🏆 <b>{enemy} повержено за {rounds} {rounds_word}!</b>"
+victory: "🏆 <b>{username}</b>: {enemy} повержен за {rounds} {rounds_word}!"
+victory_f: "🏆 <b>{username}</b>: {enemy} повержена за {rounds} {rounds_word}!"
+victory_n: "🏆 <b>{username}</b>: {enemy} повержено за {rounds} {rounds_word}!"
 victory_heal: "❤️‍🩹 Восстановлено после боя: +{hp} HP"
 reward_xp: "⭐ Опыт: +{xp}"
 reward_item: "🎒 Добыча: {item} x{count}"
 
 # Defeat report
 defeat: |
-  💀 <b>Гному надрали зад!</b>
+  💀 <b>{username}</b>: гному надрали зад!
   {enemy} оказался сильнее — бой длился {rounds} {rounds_word}.
 defeat_loot: "🎒 Обронил по дороге: {item}"
 defeat_end: "🏃 Экспедиция прервана досрочно, без опыта. Гном еле дополз домой (1 HP)."

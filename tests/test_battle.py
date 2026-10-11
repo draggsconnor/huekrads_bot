@@ -578,6 +578,38 @@ class TestExpeditionWaitsForBattle:
         fake_context.bot.send_message.assert_not_awaited()
 
 
+class TestBattleReports:
+    def test_message_contains_player(self):
+        text = battle._battle_message_text(_battle(username="tester"))
+        assert "tester против Куст" in text
+
+    def test_intro_mentions_player_once(self):
+        text = battle._battle_intro_text(_battle(username="tester"))
+        assert "tester" in text
+        assert text.count("tester") == 1  # в интро юзернейм без дублирования
+
+    def test_victory_report_contains_player(self):
+        state = _battle(username="tester", hits=1)
+        state["enemy"]["win_hits"] = 1
+        state["journal"] = [
+            {"round": 1, "attack": "body", "block": "head", "auto": False,
+             "hit": True, "blocked": None, "dmg": 0}
+        ]
+        rewards = {"xp": 10, "items": [], "healed": 0, "leveled_up": False, "level": 1, "max_hp": 200}
+        text = battle._victory_report(state, rewards)
+        assert "tester" in text
+        assert "Куст повержен за 1 раунд" in text
+
+    def test_defeat_report_contains_player(self):
+        text = battle._defeat_report(_battle(username="tester"), {"items": []})
+        assert "tester" in text
+
+    def test_username_fallback(self):
+        state = _battle()
+        state["username"] = None
+        assert battle._battle_username(state) == "Гном"
+
+
 class TestBattleCallback:
     async def test_zone_choice_advances_phase(self, tmp_path, monkeypatch, fake_context):
         monkeypatch.setattr(battle, "random", FakeRandom(0.0))

@@ -600,6 +600,10 @@ def _battle_keyboard(battle: dict[str, Any]) -> InlineKeyboardMarkup:
     )
 
 
+def _battle_username(battle: dict[str, Any]) -> str:
+    return battle.get("username") or _get_text("common.user.default_title")
+
+
 def _battle_status(battle: dict[str, Any]) -> str:
     enemy = battle.get("enemy") or {}
     return get_text(
@@ -619,6 +623,7 @@ def _battle_phase_line(battle: dict[str, Any]) -> str:
 def _battle_message_text(battle: dict[str, Any]) -> str:
     return get_text(
         "battle.message",
+        username=_battle_username(battle),
         enemy=(battle.get("enemy") or {}).get("name", "?"),
         status=_battle_status(battle),
         phase=_battle_phase_line(battle),
@@ -627,7 +632,7 @@ def _battle_message_text(battle: dict[str, Any]) -> str:
 
 def _battle_intro_text(battle: dict[str, Any]) -> str:
     enemy = battle.get("enemy") or {}
-    username = battle.get("username") or _get_text("common.user.default_title")
+    username = _battle_username(battle)
     lines = [get_text("battle.intro_title", username=username)]
     if enemy.get("desc"):
         lines.append(get_text("battle.intro_enemy", enemy=enemy.get("name"), desc=enemy["desc"]))
@@ -637,10 +642,8 @@ def _battle_intro_text(battle: dict[str, Any]) -> str:
         get_text("battle.intro_params", win_hits=enemy.get("win_hits", 1), dmg=enemy.get("dmg_per_hit", 25))
     )
     lines.append("")
-    lines.append(get_text("battle.message",
-                          enemy=enemy.get("name", "?"),
-                          status=_battle_status(battle),
-                          phase=_battle_phase_line(battle)))
+    lines.append(_battle_status(battle))
+    lines.append(_battle_phase_line(battle))
     return "\n".join(lines)
 
 
@@ -682,6 +685,7 @@ def _victory_report(battle: dict[str, Any], rewards: dict[str, Any]) -> str:
     lines = [
         get_text(
             key,
+            username=_battle_username(battle),
             enemy=enemy_name,
             rounds=rounds,
             rounds_word=_ru_plural(rounds, "раунд", "раунда", "раундов"),
@@ -705,6 +709,7 @@ def _defeat_report(battle: dict[str, Any], rewards: dict[str, Any]) -> str:
     lines = [
         get_text(
             "battle.defeat",
+            username=_battle_username(battle),
             enemy=enemy.get("name", "?"),
             rounds=rounds,
             rounds_word=_ru_plural(rounds, "раунд", "раунда", "раундов"),
