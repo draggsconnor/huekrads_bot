@@ -35,8 +35,7 @@ logger = logging.getLogger(__name__)
 # Paths
 # ---------------------------------------------------------------------------
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-ADVENTURE_DIR = os.path.join(BASE_DIR, "data", "adventure")
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))ADVENTURE_DIR = os.path.join(BASE_DIR, "data", "adventure")
 PERSIST_DIR = os.path.join(BASE_DIR, "persist")
 
 LOCATIONS_PATH = os.path.join(ADVENTURE_DIR, "locations.json")
