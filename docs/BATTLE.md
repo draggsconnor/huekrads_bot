@@ -209,4 +209,4 @@ blocked = player_block  == enemy_attack    # 1/3 если враг закрыл 
 | 👑 Королевский хуекраб | 0.1% | Соглядай + докидка 40% + сбор 60% вместе |
 
 Показ в играх: имя питомца — в `/adventure_stats` (`pets.stats_line`),
-спутник в интро боя (`pets.alongside`), реплики — `texts/pets.yaml`.
+спутник в боевом сообщении (`pets.alongside`), реплики — `texts/pets.yaml`.

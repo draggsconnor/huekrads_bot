@@ -718,14 +718,31 @@ def _scout_hint(battle: dict[str, Any]) -> str | None:
 
 
 def _battle_message_text(battle: dict[str, Any]) -> str:
-    # .rstrip(): YAML-блок message оставляет хвостовой \n после {phase}
-    text = get_text(
-        "battle.message",
-        username=_battle_username(battle),
-        enemy=(battle.get("enemy") or {}).get("name", "?"),
-        status=_battle_status(battle),
-        phase=_battle_phase_line(battle),
-    ).rstrip()
+    """Единое сообщение боя: описание врага держится до конца боя,
+    текущая обстановка (статус/фаза/арт/подсказки) дописывается внизу.
+    """
+    enemy = battle.get("enemy") or {}
+    username = _battle_username(battle)
+    lines = [get_text("battle.message", username=username, enemy=enemy.get("name", "?"))]
+
+    pet = battle.get("pet") or {}
+    if pet.get("name"):
+        lines.append(get_text("pets.alongside", pet=pet["name"]))
+
+    desc = enemy.get("desc")
+    if desc:
+        lines.append(f"<i>{desc}</i>")
+
+    lines.append(get_text(
+        "battle.params_line",
+        win_hits=enemy.get("win_hits", 1),
+        dmg=enemy.get("dmg_per_hit", 25),
+    ))
+    lines.append(_battle_status(battle))
+    lines.append("")
+    lines.append(_battle_phase_line(battle))
+    text = "\n".join(lines)
+
     # Арт только что закончившегося раунда — как мгновенная реакция.
     art = _round_art(battle)
     if art:
@@ -734,30 +751,6 @@ def _battle_message_text(battle: dict[str, Any]) -> str:
     if hint:
         text += "\n\n" + hint
     return text
-
-
-def _battle_intro_text(battle: dict[str, Any]) -> str:
-    enemy = battle.get("enemy") or {}
-    username = _battle_username(battle)
-    lines = [get_text("battle.intro_title", username=username)]
-    pet = battle.get("pet") or {}
-    if pet.get("name"):
-        lines.append(get_text("pets.alongside", pet=pet["name"]))
-    if enemy.get("desc"):
-        lines.append(get_text("battle.intro_enemy", enemy=enemy.get("name"), desc=enemy["desc"]))
-    else:
-        lines.append(get_text("battle.intro_enemy_plain", enemy=enemy.get("name")))
-    lines.append(
-        get_text("battle.intro_params", win_hits=enemy.get("win_hits", 1), dmg=enemy.get("dmg_per_hit", 25))
-    )
-    lines.append("")
-    lines.append(_battle_status(battle))
-    lines.append(_battle_phase_line(battle))
-    hint = _scout_hint(battle)
-    if hint:
-        lines.append("")
-        lines.append(hint)
-    return "\n".join(lines)
 
 
 def _journal_lines(battle: dict[str, Any]) -> list[str]:
@@ -864,7 +857,7 @@ async def _send_battle_message(user_id: int, battle: dict[str, Any], context: Co
     try:
         message = await context.bot.send_message(
             chat_id=chat_id,
-            text=_battle_intro_text(battle),
+            text=_battle_message_text(battle),
             parse_mode="HTML",
             reply_markup=_battle_keyboard(battle),
         )

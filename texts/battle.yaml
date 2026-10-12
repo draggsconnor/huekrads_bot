@@ -22,20 +22,10 @@ zone_block_names:
   body: "торс (💪)"
   dick: "хуй (🍆)"
 
-# Battle intro (first message)
-intro_title: "⚔️ <b>{username} столкнулся с врагом!</b>"
-intro_enemy: |
-  🧟 <b>{enemy}</b>
-  <i>{desc}</i>
-intro_enemy_plain: "🧟 <b>{enemy}</b>"
-intro_params: "🎯 Попаданий для победы: {win_hits} • 💥 Урон за неверный блок: {dmg}"
-
-# Recurring battle message
-message: |
-  ⚔️ <b>{username} против {enemy}</b>
-  {status}
-
-  {phase}
+# Боевой разговор: ОДНО сообщение на весь бой — описание врага держится,
+# текущая обстановка (статус/фаза/арт/подсказки) дописывается внизу в коде.
+message: "⚔️ <b>{username} против {enemy}</b>"
+params_line: "🎯 Победа: {win_hits} попаданий • 💥 Урон за неверный блок: {dmg}"
 
 status: "🎯 Попаданий: {hits}/{win_hits} • 💥 Получено урона: {dmg}"
 phase_attack: "🗡 <b>Раунд {round}</b> — выбери зону атаки (⏱ 10 сек):"

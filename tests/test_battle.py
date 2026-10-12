@@ -696,18 +696,15 @@ class TestPetPerks:
         state["phase"] = "defense"
         assert battle._scout_hint(state) is None
 
-    def test_message_contains_scout_hint_intro_alongside(self):
+    def test_message_contains_scout_hint_and_alongside(self):
         state = _battle(pet={"name": "🦀 Краб", "perks": {"scout": True}})
         state["phase"] = "attack"
         state["round"] = 1
 
+        # Одно сообщение боя: спутник и подсказка Соглядата вместе с обстановкой.
         text = battle._battle_message_text(state)
-        assert "ныряет гномом в бой" not in text  # интро — отдельное сообщение
+        assert "ныряет гномом в бой" in text
         assert "держит блок" in text
-
-        intro = battle._battle_intro_text(state)
-        assert "ныряет гномом в бой" in intro
-        assert "держит блок" in intro
 
 
 class TestBattleWatcher:
@@ -776,10 +773,10 @@ class TestBattleReports:
         text = battle._battle_message_text(_battle(username="tester"))
         assert "tester против Куст" in text
 
-    def test_intro_mentions_player_once(self):
-        text = battle._battle_intro_text(_battle(username="tester"))
+    def test_message_mentions_player_once(self):
+        text = battle._battle_message_text(_battle(username="tester"))
         assert "tester" in text
-        assert text.count("tester") == 1  # в интро юзернейм без дублирования
+        assert text.count("tester") == 1  # юзернейм без дублирования
 
     def test_victory_report_contains_player(self):
         state = _battle(username="tester", hits=1)
