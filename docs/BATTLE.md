@@ -213,7 +213,7 @@ blocked = player_block  == enemy_attack    # 1/3 если враг закрыл 
 Эффекты уровней — TBD, пока это счётчик боевого стажа. Карточка питомца —
 `/adventure_huecrab` (`render_huecrab_card`).
 
-> ⚠️ Для тестов: шанс дропа 🥚 яйца питомца временно повышен до **80%**
+> ⚠️ Для тестов: шанс дропа 🥚 яйца питомца временно повышен до **99%**
 > (`locations.json → dark_forest → pet_egg`).
 
 Показ в играх: имя питомца — в `/adventure_stats` (`pets.stats_line`),
