@@ -1,0 +1,20 @@
+# Питомцы-хуекрабы (реестр видов — data/adventure/pets.json)
+
+hatch_button: "🥚 ВЫЛУПИТЬ"
+hatch_title: "🥚 Впереди вся жизнь..."
+hatch_result: "🥚 Из яйца вылупляется {pet}!"
+hatch_replaced: "Прежний питомец {old} уползает в дикую природу с честью."
+hatch_missing: "Яйца закончились. Пустая скорлупа — тоже сувенир."
+egg_footer: "🥚 Яйцо можно вылупить — кнопка ВЫЛУПИТЬ."
+stats_line: "🐾 Питомец: {pet}"
+alongside: "🦀 {pet} ныряет гномом в бой."
+scout_hint: "🦀 {pet} моргает стебельками: враг держит блок {zone}!"
+save_art: "🦀 {pet} подставляет смоляной панцирь — {counter} разбивается!"
+perk_line: "· {name} {detail}"
+perk_chance: "({pct}%)"
+perk_names:
+  scavenger: "Докидка лута"
+  shield: "Смоляной панцирь"
+  scout: "Соглядай"
+  greedy: "Сборщик трофеев"
+  berserk: "Ярость"

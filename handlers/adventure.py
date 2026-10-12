@@ -144,6 +144,10 @@ _EXPEDITION_LOCK = threading.Lock()
 # очистную джобу сообщения (по умолчанию чистим через минуту).
 EAT_SESSION_SECONDS = 300
 
+# Яйцо питомца — ресурс с именем из таблиц локаций (пока dark_forest).
+# Единый источник имени и для инвентаря, и для вылупления (handlers/pets.py).
+PET_EGG_NAME = "🥚 Яйцо питомца"
+
 
 def parse_expedition_time(value: Any) -> datetime | None:
     """Parse an ISO datetime written by the expedition flow; UTC-aware."""
@@ -745,6 +749,7 @@ def _ensure_player_defaults(player: dict[str, Any]) -> None:
     player.setdefault("wins", 0)
     player.setdefault("active_expedition", None)
     player.setdefault("active_battle", None)
+    player.setdefault("pet", None)
 
 
 def _roll_resources(loc: dict[str, Any]) -> list[dict[str, Any]]:
@@ -887,6 +892,10 @@ async def adventure_stats_command(update: Update, context: ContextTypes.DEFAULT_
         _get_text("adventure.adventure_stats_expeditions_success", success=wins),
     ]
     
+    pet = player.get("pet")
+    if isinstance(pet, dict) and pet.get("name"):
+        stats_lines.append(_get_text("pets.stats_line", pet=pet["name"]))
+
     if failed > 0:
         stats_lines.append(_get_text("adventure.adventure_stats_expeditions_failed", failed=failed))
     
@@ -1001,18 +1010,29 @@ def _render_inventory(player: dict[str, Any]) -> str:
         lines.append("")
         lines.append(_get_text("adventure.inventory_edible_footer"))
 
+    if _count_eggs(player):
+        lines.append(_get_text("pets.egg_footer"))
+
     return "\n".join(lines)
 
 
+def _count_eggs(player: dict[str, Any]) -> int:
+    return sum(1 for item in player.get("inventory", []) if item.get("name") == PET_EGG_NAME)
+
+
 def _inventory_keyboard(user_id: int, player: dict[str, Any]):
-    if not _construct_edibles(player):
-        return None
-    return InlineKeyboardMarkup([[
-        InlineKeyboardButton(
+    rows = []
+    if _construct_edibles(player):
+        rows.append([InlineKeyboardButton(
             _get_text("adventure.inventory_use_button"),
             callback_data=f"invt_{user_id}_use",
-        )
-    ]])
+        )])
+    if _count_eggs(player):
+        rows.append([InlineKeyboardButton(
+            _get_text("pets.hatch_button"),
+            callback_data=f"invt_{user_id}_hatch",
+        )])
+    return InlineKeyboardMarkup(rows) if rows else None
 
 
 def _render_eat_panel(player: dict[str, Any]) -> str:
@@ -1120,6 +1140,38 @@ async def inventory_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         )
         if message_args:
             await redirect_self_delete(context, *message_args, DEFAULT_DELETE_DELAY)
+        await query.answer()
+        return
+
+    if action == "hatch":
+        # Ленивый импорт: handlers.pets импортирует этот модуль.
+        from handlers.pets import hatch_pet
+
+        result = hatch_pet(user.id)
+        if result.get("event") == "empty":
+            await query.answer(_get_text("pets.hatch_missing"))
+            await query.edit_message_text(
+                text=_render_inventory(player),
+                parse_mode=ParseMode.HTML,
+                reply_markup=_inventory_keyboard(user.id, player),
+            )
+            return
+
+        player = get_player(user.id)
+        lines = [
+            get_text("pets.hatch_title"),
+            get_text("pets.hatch_result", pet=result["pet_name"]),
+        ]
+        if result.get("replaced"):
+            lines.append(get_text("pets.hatch_replaced", old=result["replaced"]))
+        lines.append("")
+        lines.append(f"<i>{result.get('flavor', '')}</i>")
+        lines.extend(result.get("perk_lines") or [])
+        await query.edit_message_text(
+            text="\n".join(lines),
+            parse_mode=ParseMode.HTML,
+            reply_markup=_inventory_keyboard(user.id, player),
+        )
         await query.answer()
         return
 

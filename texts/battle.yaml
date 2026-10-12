@@ -49,6 +49,7 @@ late: "Фаза уже прошла — выбор не принят."
 round_hit_blocked: "• Р{round}: ⚔️ бил {attack} — ПОПАЛ; 🛡 закрыл {block} — отбился"
 round_hit_damaged: "• Р{round}: ⚔️ бил {attack} — ПОПАЛ; 💥 пропустил ответку ({dmg} HP)"
 round_win: "• Р{round}: ⚔️ бил {attack} — ПОПАЛ; 💥 добивающий удар!"
+round_pet_save: "• Р{round}: 🚫 бил {attack} — враг закрылся; 🦀 {pet_name} подставил панцирь под ответку!"
 round_miss_blocked: "• Р{round}: 🚫 бил {attack} — враг закрылся; 🛡 закрыл {block} — отбился"
 round_miss_damaged: "• Р{round}: 🚫 бил {attack} — враг закрылся; 💥 пропустил ответку ({dmg} HP)"
 

@@ -254,6 +254,7 @@ def _new_battle(expedition: dict[str, Any]) -> dict[str, Any] | None:
         "hits": 0,
         "dmg_taken": 0,
         "journal": [],
+        "pet": None,
         "message_id": None,
     }
 
@@ -322,6 +323,13 @@ def _resolve_round(battle: dict[str, Any], player: dict[str, Any]) -> str:
         return "victory"
 
     blocked = block == battle.get("enemy_attack")
+    pet = battle.get("pet") or {}
+    pet_perks = pet.get("perks") or {}
+    if not blocked and pet_perks.get("shield") and not battle.get("pet_shield_used"):
+        # Смоляной хуекраб: первый неверно закрытый удар принимает панцирь.
+        battle["pet_shield_used"] = True
+        blocked = True
+        entry["pet_save"] = pet.get("name")
     entry["blocked"] = blocked
     dmg = 0 if blocked else dmg_per_hit
     if dmg:
@@ -356,12 +364,20 @@ def _apply_battle_victory(player: dict[str, Any], battle: dict[str, Any]) -> dic
     player["hp"] = min(max_hp, hp_after + healed)
 
     items: list[dict[str, Any]] = []
+    pet_perks = ((battle.get("pet") or {}).get("perks") or {})
+    # Кровавый/Королевский хуекраб: победный дроп становится добрее.
+    drop_chance = pet_perks.get("berserk") or ITEM_DROP_CHANCE
     if enemy.get("loot"):
         # Спец-лут моба/босса (например, смоляное яблоко у слуги).
         for item in _roll_loot(enemy["loot"]):
             name = item.get("name") or _pool_item_name(item.get("item_id") or "")
             items.append({"name": name, "quantity": item.get("quantity", 1)})
-    if enemy.get("pool_items") and random.random() < ITEM_DROP_CHANCE:
+    if enemy.get("pool_items") and random.random() < drop_chance:
+        item_id = random.choice(enemy["pool_items"])
+        items.append({"name": _pool_item_name(item_id), "quantity": 1})
+    # Пёстрый/Королевский хуекраб: если победный дроп мимо — краб докидывает.
+    scavenger = pet_perks.get("scavenger")
+    if scavenger and enemy.get("pool_items") and not items and random.random() < scavenger:
         item_id = random.choice(enemy["pool_items"])
         items.append({"name": _pool_item_name(item_id), "quantity": 1})
     if items:
@@ -388,9 +404,12 @@ def _apply_battle_defeat(player: dict[str, Any], battle: dict[str, Any]) -> dict
     player["total_fights"] = int(player.get("total_fights", 0)) + 1
 
     items: list[dict[str, Any]] = []
+    # Хуекраб-Жадина/Королевский: при поражении колючеусый тариф выше базового.
+    pet_perks = ((battle.get("pet") or {}).get("perks") or {})
+    loot_chance = pet_perks.get("greedy") or DEFEAT_LOOT_CHANCE
     loc = load_locations().get(battle.get("location_id")) or {}
     resources = loc.get("resources") or []
-    if resources and random.random() < DEFEAT_LOOT_CHANCE:
+    if resources and random.random() < loot_chance:
         resource = random.choice(resources)
         items.append({"name": resource.get("name", resource.get("id", "?")), "quantity": 1})
     if items:
@@ -464,6 +483,9 @@ def try_start_battle(user_id: int) -> dict[str, Any] | None:
             return None
 
         _start_round(battle, now)
+        pet = player.get("pet")
+        if isinstance(pet, dict) and pet.get("name"):
+            battle["pet"] = {"name": pet.get("name"), "perks": dict(pet.get("perks") or {})}
         player["active_battle"] = battle
         save_player_data(data)
         return battle
@@ -649,6 +671,8 @@ def _round_art(battle: dict[str, Any], entry: dict[str, Any] | None = None, fina
 
     if entry.get("blocked") is None:
         pass  # победный раунд: ответный удар не проходит
+    elif entry.get("pet_save"):
+        lines.append(get_text("pets.save_art", pet=entry["pet_save"], counter=counter))
     elif entry.get("blocked"):
         lines.append(random.choice(get_text_list("battle.counter_blocked_phrases")).format(
             player=player, enemy=enemy_name, counter=counter, block=block))
@@ -681,6 +705,18 @@ def _lore_line() -> str:
     return get_text("battle.lore_line", lore=random.choice(get_text_list("battle.lore_quotes")))
 
 
+def _scout_hint(battle: dict[str, Any]) -> str | None:
+    """Подсказка Хуекраба-Соглядата: блок врага в первом раунде."""
+    pet = battle.get("pet") or {}
+    if battle.get("round", 0) != 1:
+        return None
+    perks = pet.get("perks") or {}
+    if not perks.get("scout") or battle.get("phase") != "attack":
+        return None
+    zone = get_text_mapping("battle.zone_attack_names").get(battle.get("enemy_block"), "?")
+    return get_text("pets.scout_hint", pet=pet.get("name"), zone=zone)
+
+
 def _battle_message_text(battle: dict[str, Any]) -> str:
     # .rstrip(): YAML-блок message оставляет хвостовой \n после {phase}
     text = get_text(
@@ -694,6 +730,9 @@ def _battle_message_text(battle: dict[str, Any]) -> str:
     art = _round_art(battle)
     if art:
         text += "\n\n" + art
+    hint = _scout_hint(battle)
+    if hint:
+        text += "\n\n" + hint
     return text
 
 
@@ -701,6 +740,9 @@ def _battle_intro_text(battle: dict[str, Any]) -> str:
     enemy = battle.get("enemy") or {}
     username = _battle_username(battle)
     lines = [get_text("battle.intro_title", username=username)]
+    pet = battle.get("pet") or {}
+    if pet.get("name"):
+        lines.append(get_text("pets.alongside", pet=pet["name"]))
     if enemy.get("desc"):
         lines.append(get_text("battle.intro_enemy", enemy=enemy.get("name"), desc=enemy["desc"]))
     else:
@@ -711,6 +753,10 @@ def _battle_intro_text(battle: dict[str, Any]) -> str:
     lines.append("")
     lines.append(_battle_status(battle))
     lines.append(_battle_phase_line(battle))
+    hint = _scout_hint(battle)
+    if hint:
+        lines.append("")
+        lines.append(hint)
     return "\n".join(lines)
 
 
@@ -719,23 +765,32 @@ def _journal_lines(battle: dict[str, Any]) -> list[str]:
     block_names = get_text_mapping("battle.zone_block_names")
     lines = []
     for entry in battle.get("journal") or []:
-        attack = attack_names.get(entry.get("attack"), "?")
-        block = block_names.get(entry.get("block"), "?")
-        if entry.get("hit") and entry.get("blocked"):
-            key = "battle.round_hit_blocked"
-        elif entry.get("hit"):
-            key = "battle.round_win" if entry.get("blocked") is None else "battle.round_hit_damaged"
-        elif entry.get("blocked"):
-            key = "battle.round_miss_blocked"
+        if entry.get("pet_save"):
+            line = get_text(
+                "battle.round_pet_save",
+                round=entry.get("round"),
+                attack=attack_names.get(entry.get("attack"), "?"),
+                pet_name=entry.get("pet_save"),
+                counter=attack_names.get(entry.get("enemy_attack"), "?"),
+            )
         else:
-            key = "battle.round_miss_damaged"
-        line = get_text(
-            key,
-            round=entry.get("round"),
-            attack=attack,
-            block=block,
-            dmg=entry.get("dmg", 0),
-        )
+            attack = attack_names.get(entry.get("attack"), "?")
+            block = block_names.get(entry.get("block"), "?")
+            if entry.get("hit") and entry.get("blocked"):
+                key = "battle.round_hit_blocked"
+            elif entry.get("hit"):
+                key = "battle.round_win" if entry.get("blocked") is None else "battle.round_hit_damaged"
+            elif entry.get("blocked"):
+                key = "battle.round_miss_blocked"
+            else:
+                key = "battle.round_miss_damaged"
+            line = get_text(
+                key,
+                round=entry.get("round"),
+                attack=attack,
+                block=block,
+                dmg=entry.get("dmg", 0),
+            )
         if entry.get("auto"):
             line = "⌛ " + line
         lines.append(line)

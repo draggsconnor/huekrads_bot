@@ -590,6 +590,126 @@ class TestApplyBattleVictoryLoot:
         assert player["xp"] == 10  # common
 
 
+class FakeRandom:
+    """Детерминированная замена random: 0.0 / первый элемент / минимум.
+
+    seq — очередь значений для random(): пока не исчерпана, каждый вызов
+    забирает следующее значение из списка (для проверок каскадных бросков).
+    """
+
+    def __init__(self, random_value=0.0, seq=None):
+        self.random_value = random_value
+        self._seq = list(seq or [])
+
+    def random(self):
+        if self._seq:
+            return self._seq.pop(0)
+        return self.random_value
+
+    def choice(self, seq):
+        return seq[0]
+
+    def randint(self, a, b):
+        return a
+
+    def uniform(self, a, b):
+        return a
+
+
+class TestPetPerks:
+    """Перки питомцев в боевой системе"""
+
+    def _state(self, perks, player=None):
+        state = _battle()
+        state["pet"] = {"name": "🦀 Краб", "perks": perks}
+        return state, (player or {"hp": 200, "max_hp": 200, "xp": 0, "inventory": []})
+
+    def test_shield_blocks_first_counter_only(self):
+        state, player = self._state({"shield": True})
+        state["player_attack"] = "body"   # == enemy_block "body" -> промах
+        state["player_block"] = "body"    # != enemy_attack "head" -> урон, но панцирь
+
+        outcome = battle._resolve_round(state, player)
+        assert outcome == "continue"
+        assert state["dmg_taken"] == 0            # панцирь принял удар
+        assert state["journal"][0]["pet_save"] == "🦀 Краб"
+
+        # Второй неверный блок уже платит по тарифу (зоны фиксируем руками).
+        battle._start_round(state)
+        state["enemy_attack"] = "head"
+        state["enemy_block"] = "head"
+        state["player_attack"] = "head"           # промах
+        state["player_block"] = "body"
+        battle._resolve_round(state, player)
+        assert state["dmg_taken"] == 25
+        assert state["journal"][1].get("pet_save") is None
+
+    def test_scavenger_fills_failed_pool_drop(self, tmp_path, monkeypatch):
+        _setup_paths(tmp_path, monkeypatch)
+        # 0.9: пул не сработал; 0.3: докидка (royal 0.4) сработала.
+        monkeypatch.setattr(battle, "random", FakeRandom(seq=[0.9, 0.3]))
+        player = {"hp": 200, "max_hp": 200, "xp": 0, "inventory": []}
+        enemy = {"name": "Крыс", "tier": "common", "win_hits": 1, "dmg_per_hit": 25,
+                 "base_reward": 0, "loot": [], "pool_items": ["herb"]}
+        state = _battle(enemy=enemy,
+                        pet={"name": "👑 Королевский хуекраб", "perks": {"scavenger": 0.4}})
+        state["player_attack"] = "head"
+        state["player_block"] = "head"  # враг держит "head" -> добивающее попадание 1/1
+
+        assert battle._resolve_round(state, player) == "victory"
+        rewards = battle._settle_battle(player, state, "victory")
+        names = [i["name"] for i in player["inventory"]]
+        assert names == ["🌿 Трава"]  # только крабова докидка
+        assert rewards["xp"] == 10
+
+    def test_berserk_boosts_drop_chance(self, tmp_path, monkeypatch):
+        _setup_paths(tmp_path, monkeypatch)
+        monkeypatch.setattr(battle, "random", FakeRandom(0.6))  # 0.6: базовый 50% мимо, ярость 75% попала
+        player = {"hp": 200, "max_hp": 200, "xp": 0, "inventory": []}
+        enemy = {"name": "Крыс", "tier": "common", "win_hits": 1, "dmg_per_hit": 25,
+                 "base_reward": 0, "loot": [], "pool_items": ["herb"]}
+        state = _battle(enemy=enemy, pet={"name": "🦀 Краб", "perks": {"berserk": 0.75}})
+
+        battle._apply_battle_victory(player, state)
+        assert [i["name"] for i in player["inventory"]] == ["🌿 Трава"]
+
+    def test_greedy_raises_defeat_loot_chance(self, tmp_path, monkeypatch):
+        _setup_paths(tmp_path, monkeypatch)
+        monkeypatch.setattr(battle, "random", FakeRandom(0.5))  # 0.5: базовых 25% нет, жадных 60% есть
+        player = {"hp": 200, "max_hp": 200, "xp": 0, "inventory": []}
+        state = _battle(pet={"name": "👑 Краб", "perks": {"greedy": 0.6}})
+
+        battle._apply_battle_defeat(player, state)
+        assert [i["name"] for i in player["inventory"]] == ["🌿 Хвоя"]
+
+    def test_scout_hint_only_round_one_attack(self):
+        state = _battle(pet={"name": "🦀 Краб", "perks": {"scout": True}})
+        state["phase"] = "attack"
+        state["round"] = 1
+
+        hint = battle._scout_hint(state)
+        assert hint and "держит блок" in hint and "в торс" in hint
+
+        state["round"] = 2
+        assert battle._scout_hint(state) is None
+        state["round"] = 1
+        state["phase"] = "defense"
+        assert battle._scout_hint(state) is None
+
+    def test_message_contains_scout_hint_intro_alongside(self):
+        state = _battle(pet={"name": "🦀 Краб", "perks": {"scout": True}})
+        state["phase"] = "attack"
+        state["round"] = 1
+
+        text = battle._battle_message_text(state)
+        assert "ныряет гномом в бой" not in text  # интро — отдельное сообщение
+        assert "держит блок" in text
+
+        intro = battle._battle_intro_text(state)
+        assert "ныряет гномом в бой" in intro
+        assert "держит блок" in intro
+
+
 class TestBattleWatcher:
     async def test_advances_expired_phase(self, tmp_path, monkeypatch, fake_context):
         monkeypatch.setattr(battle, "random", FakeRandom(0.0))
