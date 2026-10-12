@@ -2,6 +2,7 @@ commands:
   adventure: "Экспедиции"
   adventure_stats: "Статистика экспедиции"
   adventure_inventory: "Инвентарь экспедиции"
+  huecrab: "Хуекраб"
   start: "Запустить бота"
   help: "Справка"
 

@@ -45,6 +45,7 @@ from handlers.adventure import (
     save_player_data,
     send_expedition_result,
 )
+from handlers.pets import pet_xp_for_next_level
 from text_resources import get_text, get_text_list, get_text_mapping
 
 logger = logging.getLogger(__name__)
@@ -58,6 +59,7 @@ BOSS_XP_BASE = 10
 ITEM_DROP_CHANCE = 0.5
 VICTORY_HEAL = 20
 DEFEAT_LOOT_CHANCE = 0.25
+PET_XP_ON_DEFEAT = 5
 BATTLE_WATCH_INTERVAL = 10
 
 
@@ -422,6 +424,7 @@ def _settle_battle(player: dict[str, Any], battle: dict[str, Any], outcome: str)
     player["active_battle"] = None
     if outcome == "victory":
         rewards = _apply_battle_victory(player, battle)
+        pet_xp_gained = int(rewards.get("xp", 0))
         expedition = player.get("active_expedition")
         if isinstance(expedition, dict):
             expedition.setdefault("battle_log", []).append({
@@ -431,10 +434,21 @@ def _settle_battle(player: dict[str, Any], battle: dict[str, Any], outcome: str)
                 "xp": rewards["xp"],
                 "item": ", ".join(i["name"] for i in rewards["items"]) or None,
             })
-        return rewards
-    # Поражение: экспедиция прервана досрочно.
-    rewards = _apply_battle_defeat(player, battle)
-    player["active_expedition"] = None
+    else:
+        # Поражение: экспедиция прервана досрочно.
+        rewards = _apply_battle_defeat(player, battle)
+        pet_xp_gained = PET_XP_ON_DEFEAT
+        player["active_expedition"] = None
+
+    # Питомец набивает XP за любой бой (что растёт с уровнем — TBD).
+    pet = player.get("pet")
+    if isinstance(pet, dict) and pet.get("name"):
+        pet["xp"] = int(pet.get("xp", 0)) + pet_xp_gained
+        while pet["xp"] >= pet_xp_for_next_level(int(pet.get("level", 1))):
+            pet["xp"] -= pet_xp_for_next_level(int(pet.get("level", 1)))
+            pet["level"] = int(pet.get("level", 1)) + 1
+            rewards["pet_levelled"] = {"pet": pet.get("name"), "level": pet["level"]}
+
     return rewards
 
 
@@ -803,6 +817,8 @@ def _victory_report(battle: dict[str, Any], rewards: dict[str, Any]) -> str:
     lines.append(get_text("battle.reward_xp", xp=rewards.get("xp", 0)))
     for item in rewards.get("items") or []:
         lines.append(get_text("battle.reward_item", item=item.get("name"), count=item.get("quantity", 1)))
+    if rewards.get("pet_levelled"):
+        lines.append(get_text("pets.level_up", **rewards["pet_levelled"]))
     if rewards.get("leveled_up"):
         lines.append("")
         lines.append(get_text("adventure.level_up", level=rewards.get("level"), max_hp=rewards.get("max_hp")))
@@ -824,6 +840,8 @@ def _defeat_report(battle: dict[str, Any], rewards: dict[str, Any]) -> str:
     lines.append("")
     for item in rewards.get("items") or []:
         lines.append(get_text("battle.defeat_loot", item=item.get("name")))
+    if rewards.get("pet_levelled"):
+        lines.append(get_text("pets.level_up", **rewards["pet_levelled"]))
     lines.append(get_text("battle.defeat_end"))
     lines.append("")
     lines.append(get_text("battle.journal_header"))

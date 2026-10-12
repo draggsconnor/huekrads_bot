@@ -707,6 +707,47 @@ class TestPetPerks:
         assert "держит блок" in text
 
 
+class TestPetXp:
+    """Хуекраб получает XP за любой бой и апает уровень"""
+
+    def test_pet_xp_on_victory_and_level_up(self, tmp_path, monkeypatch):
+        _setup_paths(tmp_path, monkeypatch)
+        player = {
+            "hp": 200, "max_hp": 200, "xp": 0, "inventory": [],
+            "total_expeditions": 0,
+            "pet": {"id": "piebald_crab", "name": "🦀 Пёстрый хуекраб",
+                    "perks": {}, "level": 1, "xp": 45},
+        }
+        state = _battle(enemy={"name": "Крыс", "tier": "common", "win_hits": 1,
+                               "dmg_per_hit": 25, "base_reward": 0, "loot": [],
+                               "pool_items": ["herb"]})
+        state["player_attack"] = "head"
+        state["player_block"] = "head"  # враг держит "head" -> добивающее попадание
+
+        assert battle._resolve_round(state, player) == "victory"
+        rewards = battle._settle_battle(player, state, "victory")
+
+        # 45 + 10 XP за победу = 55 >= 50 -> уровень 2, остаток 5.
+        assert rewards["pet_levelled"]["level"] == 2
+        assert player["pet"]["level"] == 2
+        assert player["pet"]["xp"] == 5
+
+    def test_pet_xp_on_defeat(self, tmp_path, monkeypatch):
+        _setup_paths(tmp_path, monkeypatch)
+        player = {
+            "hp": 200, "max_hp": 200, "xp": 0, "inventory": [],
+            "total_expeditions": 0,
+            "pet": {"id": "piebald_crab", "name": "🦀 Пёстрый хуекраб",
+                    "perks": {}, "level": 1, "xp": 0},
+        }
+        state = _battle()
+        battle._apply_battle_defeat(player, state)
+        rewards = battle._settle_battle(player, battle=state, outcome="defeat")
+        assert player["pet"]["xp"] == 5  # дежурный опыт за поражение
+        assert player["pet"]["level"] == 1
+        assert "pet_levelled" not in rewards
+
+
 class TestBattleWatcher:
     async def test_advances_expired_phase(self, tmp_path, monkeypatch, fake_context):
         monkeypatch.setattr(battle, "random", FakeRandom(0.0))

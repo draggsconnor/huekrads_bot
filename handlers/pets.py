@@ -12,14 +12,20 @@ import os
 import random
 from typing import Any
 
+from telegram import Update
+from telegram.ext import ContextTypes
+from telegram.constants import ParseMode
+
 from handlers.adventure import (
     _EXPEDITION_LOCK,
     _ensure_player_defaults,
     _player_key,
+    get_player,
     load_player_data,
     save_player_data,
     PET_EGG_NAME,
 )
+from handlers.utils import schedule_self_delete
 from text_resources import get_text, get_text_mapping
 
 logger = logging.getLogger(__name__)
@@ -55,6 +61,15 @@ def roll_pet() -> dict[str, Any]:
     return {**last_crab, "id": last_id}
 
 
+def pet_xp_for_next_level(level: int) -> int:
+    """XP до следующего уровня хуекраба (50 на уровень).
+
+    Что именно растёт с уровнем краба — Пока не согласовано; уровень —
+    просто счётчик боевого стажа.
+    """
+    return 50 * level
+
+
 def perk_lines(perks: dict[str, Any]) -> list[str]:
     """Строки описания перков для карточки вылупления."""
     names = get_text_mapping("pets.perk_names")
@@ -69,6 +84,46 @@ def perk_lines(perks: dict[str, Any]) -> list[str]:
             detail = ""
         lines.append(get_text("pets.perk_line", name=pname, detail=detail))
     return lines
+
+
+def render_huecrab_card(player: dict[str, Any]) -> str:
+    """Карточка питомца для /adventure_huecrab (описание, перки, уровень)."""
+    pet = player.get("pet")
+    if not isinstance(pet, dict) or not pet.get("name"):
+        return get_text("pets.card_missing")
+
+    lines = [pet.get("name")]
+    registry_entry = (load_pets().get("crabs") or {}).get(pet.get("id")) or {}
+    flavor = registry_entry.get("flavor")
+    if flavor:
+        lines.append(f"<i>{flavor}</i>")
+
+    level = int(pet.get("level", 1))
+    xp = int(pet.get("xp", 0))
+    lines.append("")
+    lines.append(get_text(
+        "pets.card_level",
+        level=level, xp=xp, to_next=pet_xp_for_next_level(level),
+    ))
+    lines.extend(perk_lines(pet.get("perks") or {}))
+    return "\n".join(lines)
+
+
+async def adventure_huecrab_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/adventure_huecrab — карточка активного хуекраба."""
+    user = update.effective_user
+    if not user or not update.effective_message:
+        return
+
+    # Уборка: команда и ответ бота живут минуту.
+    await schedule_self_delete(context, update.effective_message)
+
+    player = get_player(user.id)
+    message = await update.effective_message.reply_text(
+        render_huecrab_card(player),
+        parse_mode=ParseMode.HTML,
+    )
+    await schedule_self_delete(context, message)
 
 
 def hatch_pet(user_id: int) -> dict[str, Any]:
@@ -101,6 +156,8 @@ def hatch_pet(user_id: int) -> dict[str, Any]:
             "id": species["id"],
             "name": species.get("name"),
             "perks": dict(species.get("perks") or {}),
+            "level": 1,
+            "xp": 0,
         }
         save_player_data(data)
 

@@ -50,6 +50,7 @@ def test_bot_command_menu_preserves_descriptions_and_order():
         ("adventure", "Экспедиции"),
         ("adventure_stats", "Статистика экспедиции"),
         ("adventure_inventory", "Инвентарь экспедиции"),
+        ("adventure_huecrab", "Хуекраб"),
     ]
 
 

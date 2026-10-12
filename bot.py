@@ -19,6 +19,7 @@ from handlers.adventure import (
 )
 from handlers.adventure_expiration_checker import expedition_expiration_job
 from handlers.battle import battle_callback, battle_watcher_job
+from handlers.pets import adventure_huecrab_command
 from handlers.utils import error_handler, schedule_self_delete
 from text_resources import get_text
 
@@ -38,6 +39,7 @@ BOT_COMMANDS = [
     BotCommand("adventure", get_text("menu.commands.adventure")),
     BotCommand("adventure_stats", get_text("menu.commands.adventure_stats")),
     BotCommand("adventure_inventory", get_text("menu.commands.adventure_inventory")),
+    BotCommand("adventure_huecrab", get_text("menu.commands.huecrab")),
 ]
 
 
@@ -96,6 +98,7 @@ def main() -> None:
     application.add_handler(CommandHandler("adventure", adventure_command))
     application.add_handler(CommandHandler("adventure_stats", adventure_stats_command))
     application.add_handler(CommandHandler("adventure_inventory", adventure_inventory_command))
+    application.add_handler(CommandHandler("adventure_huecrab", adventure_huecrab_command))
     application.add_handler(
         CallbackQueryHandler(
             adventure_callback,

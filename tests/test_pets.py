@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock
 
 import handlers.adventure as adv
 import handlers.pets as pets
+from handlers import utils
 
 from tests.test_battle import FakeRandom
 
@@ -80,6 +81,57 @@ class TestHatchPet:
         assert pets.hatch_pet(123) == {"event": "empty"}
 
 
+class TestHuecrabCard:
+    """/adventure_huecrab: карточка питомца"""
+
+    def test_card_full(self, tmp_path, monkeypatch):
+        _setup(tmp_path, monkeypatch, {
+            "hp": 200, "max_hp": 200,
+            "pet": {"id": "piebald_crab", "name": "🦀 Пёстрый хуекраб",
+                    "perks": {"scavenger": 0.25}, "level": 2, "xp": 30},
+            "inventory": [],
+        })
+
+        text = pets.render_huecrab_card({"pet": {
+            "id": "piebald_crab", "name": "🦀 Пёстрый хуекраб",
+            "perks": {"scavenger": 0.25}, "level": 2, "xp": 30,
+        }})
+        assert "🦀 Пёстрый хуекраб" in text
+        assert "<i>f1</i>" in text                     # полный флавор из реестра
+        assert "Уровень 2 (30/100 XP)" in text
+        assert "Докидка лута (25%)" in text
+
+    def test_card_without_pet(self):
+        text = pets.render_huecrab_card({"pet": None})
+        assert "Питомца пока нет" in text
+        assert "ВЫЛУПИТЬ" in text
+
+    async def test_command_renders_card(self, tmp_path, monkeypatch, fake_context):
+        _setup(tmp_path, monkeypatch, {
+            "hp": 200, "max_hp": 200, "lvl": 1,
+            "pet": {"id": "piebald_crab", "name": "🦀 Пёстрый хуекраб",
+                    "perks": {"scavenger": 0.25}, "level": 1, "xp": 0},
+            "inventory": [],
+        })
+
+        reply = AsyncMock(return_value=SimpleNamespace(chat_id=-42, message_id=310))
+        await pets.adventure_huecrab_command(
+            SimpleNamespace(
+                effective_user=SimpleNamespace(id=123),
+                effective_message=SimpleNamespace(chat_id=-42, message_id=309, reply_text=reply),
+            ),
+            fake_context,
+        )
+        text = reply.await_args.args[0]
+        assert "🦀 Пёстрый хуекраб" in text
+        # Самоочистка подключена (команда + ответ).
+        scheduled = [
+            call for call in fake_context.job_queue.calls
+            if call[0] is utils.self_delete_job
+        ]
+        assert len(scheduled) == 2
+
+
 class TestPetFlowUI:
     async def test_hatch_button_and_callback(self, tmp_path, monkeypatch, fake_context):
         monkeypatch.setattr(pets, "random", FakeRandom(0.0))  # первый вид: Пёстрый
@@ -131,4 +183,4 @@ class TestPetFlowUI:
             ),
             fake_context,
         )
-        assert "🐾 Питомец: 🦀 Пёстрый хуекраб" in reply.await_args.args[0]
+        assert "🐾 Питомец: 🦀 Пёстрый хуекраб (ур. 1)" in reply.await_args.args[0]

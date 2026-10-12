@@ -894,7 +894,10 @@ async def adventure_stats_command(update: Update, context: ContextTypes.DEFAULT_
     
     pet = player.get("pet")
     if isinstance(pet, dict) and pet.get("name"):
-        stats_lines.append(_get_text("pets.stats_line", pet=pet["name"]))
+        stats_lines.append(_get_text(
+            "pets.stats_line",
+            pet=f"{pet['name']} (ур. {int(pet.get('level', 1))})",
+        ))
 
     if failed > 0:
         stats_lines.append(_get_text("adventure.adventure_stats_expeditions_failed", failed=failed))
