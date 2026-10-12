@@ -19,8 +19,12 @@ from handlers.adventure import (
 )
 from handlers.adventure_expiration_checker import expedition_expiration_job
 from handlers.battle import battle_callback, battle_watcher_job
-from handlers.pets import adventure_huecrab_command
-from handlers.pets import adventure_huecrab_name_command
+from handlers.pets import (
+    adventure_huecrab_command,
+    adventure_huecrab_name_command,
+    adventure_saray_command,
+    saray_callback,
+)
 from handlers.utils import error_handler, schedule_self_delete
 from text_resources import get_text
 
@@ -101,6 +105,7 @@ def main() -> None:
     application.add_handler(CommandHandler("adventure_inventory", adventure_inventory_command))
     application.add_handler(CommandHandler("adventure_huecrab", adventure_huecrab_command))
     application.add_handler(CommandHandler("adventure_huecrab_name", adventure_huecrab_name_command))
+    application.add_handler(CommandHandler("adventure_saray", adventure_saray_command))
     application.add_handler(
         CallbackQueryHandler(
             adventure_callback,
@@ -117,6 +122,12 @@ def main() -> None:
         CallbackQueryHandler(
             inventory_callback,
             pattern=r"^invt_",
+        )
+    )
+    application.add_handler(
+        CallbackQueryHandler(
+            saray_callback,
+            pattern=r"^saray_",
         )
     )
     application.add_error_handler(error_handler)

@@ -105,6 +105,50 @@
     "requirements": {
       "min_level": 2
     },
+    "resources": [
+      {
+        "id": "quartz_dust",
+        "name": "✨ Кварцевая крошка",
+        "description": "Пыль из расколотого кристалла — колется хуже правды, но красиво сыпется.",
+        "chance": 0.60,
+        "rarity": "common"
+      },
+      {
+        "id": "crushed_stone",
+        "name": "🪨 Дроблёный камень",
+        "description": "Камень, отколотый заботливо и без свидетелей. Основа для чего угодно.",
+        "chance": 0.45,
+        "rarity": "common"
+      },
+      {
+        "id": "crystal_shard",
+        "name": "💎 Осколок кристалла",
+        "description": "Светится бывалом светом шахты. Годится для крафта всего блестящего.",
+        "chance": 0.35,
+        "rarity": "uncommon"
+      },
+      {
+        "id": "ancient_bones",
+        "name": "🦴 Древние кости",
+        "description": "Кости древних существ. Гномы считают, что это их дальние родственники.",
+        "chance": 0.20,
+        "rarity": "uncommon"
+      },
+      {
+        "id": "rusty_chisel",
+        "name": "⛏ Ржавое зубило",
+        "description": "Зубило, которым шахту и копали. Тупое, но памятное.",
+        "chance": 0.05,
+        "rarity": "epic"
+      },
+      {
+        "id": "traitor_purse",
+        "name": "💰 Кошель гнома-предателя",
+        "description": "Потерян в панике при встрече с троллем. Монеты все на месте.",
+        "chance": 0.02,
+        "rarity": "epic"
+      }
+    ],
     "expedition_duration_seconds": 420,
     "encounter_chance": 0.50,
     "available_actions": ["dig", "explore", "rest"],

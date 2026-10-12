@@ -126,7 +126,7 @@ class TestHuecrabNameCommand:
         assert stored["pet"]["renamed"] is True
 
 
-class TestHatchPetReplacement:
+class TestHatchPet:
     def test_hatch_consumes_egg_and_assigns_pet(self, tmp_path, monkeypatch):
         monkeypatch.setattr(pets, "random", FakeRandom(0.0))  # первый вид из реестра
         data_path = _setup(tmp_path, monkeypatch, {
@@ -157,17 +157,153 @@ class TestHatchPetReplacement:
         monkeypatch.setattr(pets, "random", FakeRandom(0.0))
         data_path = _setup(tmp_path, monkeypatch, {
             "hp": 200, "max_hp": 200,
-            "pet": {"id": "old_crab", "name": "🦀 Старый краб", "perks": {}},
+            "pet": {"id": "old_crab", "name": "🦀 Старый краб", "perks": {}, "level": 2, "xp": 25},
             "inventory": [{"name": EGG, "quantity": 1}],
         })
 
         result = pets.hatch_pet(123)
         assert result["replaced"] == "🦀 Старый краб"
-        assert _read(data_path)["pet"]["name"] == "🦀 Пёстрый хуекраб"
+        with open(data_path, encoding="utf-8") as f:
+            stored = json.load(f)["123"]
+        assert stored["pet"]["name"] == "🦀 Пёстрый хуекраб"
+        assert stored["pet"]["level"] == 1 and stored["pet"]["xp"] == 0
+        # Старик продолжает жить в сарае со своим стажем.
+        assert stored["saray"][0]["name"] == "🦀 Старый краб"
+        assert stored["saray"][0]["level"] == 2
+        assert stored["saray"][0]["xp"] == 25
 
     def test_hatch_without_egg(self, tmp_path, monkeypatch):
         _setup(tmp_path, monkeypatch, {"hp": 200, "max_hp": 200, "inventory": []})
         assert pets.hatch_pet(123) == {"event": "empty"}
+
+
+class TestSaray:
+    """Смена экипированного краба (вне боя)"""
+
+    def _setup(self, tmp_path, monkeypatch, player):
+        data_path = tmp_path / "player_data.json"
+        with open(data_path, "w", encoding="utf-8") as f:
+            json.dump({"123": player}, f, ensure_ascii=False)
+        monkeypatch.setattr(adv, "PLAYER_DATA_PATH", str(data_path))
+
+        pets_path = tmp_path / "pets.json"
+        with open(pets_path, "w", encoding="utf-8") as f:
+            json.dump(PETS, f, ensure_ascii=False)
+        monkeypatch.setattr(pets, "PETS_PATH", str(pets_path))
+        return data_path
+
+    def _read(self, data_path):
+        with open(data_path, encoding="utf-8") as f:
+            return json.load(f)["123"]
+
+    def test_swap_swaps_and_keeps_xp(self, tmp_path, monkeypatch):
+        data_path = self._setup(tmp_path, monkeypatch, {
+            "hp": 200, "max_hp": 200, "pet": {
+                "id": "resin_crab", "name": "🦀 Смоляной хуекраб",
+                "perks": {"shield": True}, "level": 4, "xp": 10, "uid": "aaa111"},
+            "saray": [{"id": "piebald_crab", "name": "🦀 Пёстрый хуекраб",
+                           "perks": {"scavenger": 0.25}, "level": 1, "xp": 45, "uid": "bbb222"}],
+        })
+
+        result = pets.move_to_saray(123, "bbb222")
+        assert result["event"] == "swapped"
+        assert result["new"] == "🦀 Пёстрый хуекраб"
+        assert result["old"] == "🦀 Смоляной хуекраб"
+
+        stored = self._read(data_path)
+        assert stored["pet"]["name"] == "🦀 Пёстрый хуекраб"
+        assert stored["pet"]["level"] == 1
+        assert stored["saray"][0]["name"] == "🦀 Смоляной хуекраб"
+        assert stored["saray"][0]["level"] == 4  # стаж сохраняется в сарае
+
+    def test_swap_blocked_in_battle(self, tmp_path, monkeypatch):
+        self._setup(tmp_path, monkeypatch, {
+            "hp": 200, "max_hp": 200, "active_battle": {"battle_id": "abc"},
+            "pet": {"id": "resin_crab", "name": "🦀 Смоляной хуекраб", "perks": {}, "uid": "aaa111"},
+            "saray": [{"id": "piebald_crab", "name": "🦀 Пёстрый хуекраб", "perks": {}, "uid": "bbb222"}],
+        })
+        assert pets.move_to_saray(123, "bbb222") == {"event": "battle"}
+
+    def test_swap_unknown_uid(self, tmp_path, monkeypatch):
+        self._setup(tmp_path, monkeypatch, {
+            "hp": 200, "max_hp": 200,
+            "pet": {"id": "resin_crab", "name": "🦀 Краб", "perks": {}, "uid": "aaa111"},
+            "saray": [],
+        })
+        assert pets.move_to_saray(123, "zzz999")["event"] == "empty"
+
+    def test_named_flag_travels_with_crab(self, tmp_path, monkeypatch):
+        """Имя — свойство конкретного краба: söldner краба снова можно назвать."""
+        data_path = self._setup(tmp_path, monkeypatch, {
+            "hp": 200, "max_hp": 200,
+            "pet": {"id": "resin_crab", "name": "🦀 Смоляной хуекраб", "perks": {}, "uid": "aaa111"},
+            "saray": [{"id": "piebald_crab", "name": "🦀 Пёстрый хуекраб", "perks": {}, "uid": "bbb222"}],
+        })
+
+        # Назвали смоляного (только сейчас экипированного).
+        assert pets.name_pet(123, "Смоляк")["event"] == "named"
+
+        # Сменили на пёстрого без имени — его можно назвать.
+        pets.move_to_saray(123, "bbb222")
+        assert pets.name_pet(123, "Пятнистый")["event"] == "named"
+
+        # Вернули смоляного — имя его с ним же и ходит.
+        pets.move_to_saray(123, "aaa111")
+        assert pets.name_pet(123, "Ещё Раз")["event"] == "already_named"
+        assert self._read(data_path)["pet"]["name"] == "Смоляк"
+
+    async def test_command_and_pick_flow(self, tmp_path, monkeypatch, fake_context):
+        monkeypatch.setattr(pets, "random", FakeRandom(0.0))
+        data_path = self._setup(tmp_path, monkeypatch, {
+            "hp": 200, "max_hp": 200, "lvl": 1,
+            "pet": {"id": "resin_crab", "name": "🦀 Смоляной хуекраб",
+                    "perks": {"shield": True}, "level": 4, "xp": 0, "uid": "aaa111"},
+            "saray": [{"id": "piebald_crab", "name": "🦀 Пёстрый хуекраб",
+                       "perks": {"scavenger": 0.25}, "level": 1, "xp": 0, "uid": "bbb222"}],
+        })
+
+        # 1) /adventure_saray: карточка + кнопка ВЫБРАТЬ.
+        reply = AsyncMock(return_value=SimpleNamespace(chat_id=-42, message_id=400))
+        await pets.adventure_saray_command(
+            SimpleNamespace(
+                effective_user=SimpleNamespace(id=123),
+                effective_message=SimpleNamespace(chat_id=-42, message_id=399, reply_text=reply),
+            ),
+            fake_context,
+        )
+        commands_text = reply.await_args.args[0]
+        assert "САРАЙ ХУЕКРАБОВ" in commands_text
+        texts = [b.text for row in reply.await_args.kwargs["reply_markup"].inline_keyboard for b in row]
+        assert any("ВЫБРАТЬ" in t for t in texts)
+
+        # 2) ВЫБРАТЬ: пикер с сарасыми крабами.
+        query = SimpleNamespace(
+            data="saray_123_open", answer=AsyncMock(), edit_message_text=AsyncMock(),
+            message=SimpleNamespace(chat_id=-42, message_id=400),
+        )
+        await pets.saray_callback(
+            SimpleNamespace(callback_query=query, effective_user=SimpleNamespace(id=123)),
+            fake_context,
+        )
+        pick = query.edit_message_text.await_args.kwargs
+        assert "Кого берём" in pick["text"]
+        pick_texts = [b.text for row in pick["reply_markup"].inline_keyboard for b in row]
+        assert any("Пёстрый" in t and "ур. 1" in t for t in pick_texts)
+
+        # 3) Выбор краба: смена + обновлённый список.
+        query2 = SimpleNamespace(
+            data="saray_123_swap_bbb222", answer=AsyncMock(), edit_message_text=AsyncMock(),
+            message=SimpleNamespace(chat_id=-42, message_id=400),
+        )
+        await pets.saray_callback(
+            SimpleNamespace(callback_query=query2, effective_user=SimpleNamespace(id=123)),
+            fake_context,
+        )
+        swapped = query2.edit_message_text.await_args.kwargs["text"]
+        assert "На смену выходит" in swapped
+        stored = json.load(open(data_path, encoding="utf-8"))["123"]
+        assert stored["pet"]["uid"] == "bbb222"
+        assert stored["saray"][0]["uid"] == "aaa111"
 
 
 class TestHuecrabCard:
