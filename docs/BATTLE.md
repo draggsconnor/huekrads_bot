@@ -87,6 +87,19 @@ blocked = player_block  == enemy_attack    # 1/3 игомень закрыл г�
 - Минимальный лут: **один** ресурс локации с шансом 25%.
 - Экспедиция завершается немедленно: отчёт боя отправляется, `active_expedition` очищается.
 
+### Формат отчётов («дуэльный» стиль)
+
+- Художественные описания раундов — из каталогов фраз в `texts/battle.yaml`
+  (`final_blow_phrases`, `attack_hit_phrases`, `attack_miss_phrases`,
+  `counter_blocked_phrases`, `counter_hit_phrases`); выбор — `random.choice`
+  в коде, тексты живут только в YAML (см. TEXT_MIGRATION_AUDIT: порядок RNG-вызовов не менять).
+- Арт решающего раунда стоит вверху отчёта; далее блок «🗡 Итоги боя» (враг, попадания,
+  урон, длительность), награды, «📓 Хроника боя» и случайная гномья байка (`lore_quotes`) в конце.
+- Арт последнего раунда также приходит в фазовых сообщениях («⚔️ {username} против {enemy}»)
+  — мгновенная реакция на только что отыгранный раунд.
+- Журнал раунда хранит скрытые зоны врага (`enemy_attack`/`enemy_block`) —
+  они нужны для описания ответок.
+
 ## 7. Параметры врагов
 
 Дефолты по тирам (`mobs.json → battle_defaults`), переопределяются per-моб/per-босс ключом `battle`:
@@ -130,7 +143,8 @@ blocked = player_block  == enemy_attack    # 1/3 игомень закрыл г�
   "auto_attack": false, "auto_block": false,
   "phase_deadline": "ISO-срок текущей фазы",
   "hits": 1, "dmg_taken": 40,
-  "journal": [{"round", "attack", "block", "auto", "hit", "blocked", "dmg"}],
+  "journal": [{"round", "attack", "block", "enemy_attack", "enemy_block",
+               "auto", "hit", "blocked", "dmg"}],
   "message_id": 123456                          // какое сообщение правим
 }
 ```

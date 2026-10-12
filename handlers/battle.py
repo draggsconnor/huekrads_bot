@@ -33,7 +33,6 @@ from handlers.adventure import (
     _EXPEDITION_LOCK,
     _apply_level_ups,
     _ensure_player_defaults,
-    _get_mob_gender,
     _get_text,
     _player_key,
     _ru_plural,
@@ -46,7 +45,7 @@ from handlers.adventure import (
     save_player_data,
     send_expedition_result,
 )
-from text_resources import get_text, get_text_mapping
+from text_resources import get_text, get_text_list, get_text_mapping
 
 logger = logging.getLogger(__name__)
 
@@ -304,6 +303,8 @@ def _resolve_round(battle: dict[str, Any], player: dict[str, Any]) -> str:
         "round": battle["round"],
         "attack": attack,
         "block": block,
+        "enemy_attack": battle.get("enemy_attack"),
+        "enemy_block": battle.get("enemy_block"),
         "auto": bool(battle.get("auto_attack") or battle.get("auto_block")),
     }
 
@@ -620,14 +621,79 @@ def _battle_phase_line(battle: dict[str, Any]) -> str:
     return get_text("battle.phase_attack", round=battle.get("round", 1))
 
 
-def _battle_message_text(battle: dict[str, Any]) -> str:
+def _round_art(battle: dict[str, Any], entry: dict[str, Any] | None = None, final: bool = False) -> str | None:
+    """Художественное описание раунда из каталогов фраз (для фаз и отчётов).
+
+    Побединый хит гасит ответку — арт победного раунда состоит из одной строки.
+    """
+    entry = entry or (battle.get("journal") or [None])[-1]
+    if not entry:
+        return None
+    enemy_name = (battle.get("enemy") or {}).get("name", "?")
+    player = _battle_username(battle)
+    attack_names = get_text_mapping("battle.zone_attack_names")
+    block_names = get_text_mapping("battle.zone_block_names")
+    attack = attack_names.get(entry.get("attack"), "?")
+    counter = attack_names.get(entry.get("enemy_attack"), "?")
+    block = block_names.get(entry.get("block"), "?")
+
+    lines = []
+    if entry.get("hit"):
+        catalog = "battle.final_blow_phrases" if final else "battle.attack_hit_phrases"
+        lines.append(random.choice(get_text_list(catalog)).format(
+            player=player, enemy=enemy_name, attack=attack))
+    else:
+        lines.append(random.choice(get_text_list("battle.attack_miss_phrases")).format(
+            player=player, enemy=enemy_name, attack=attack))
+
+    if entry.get("blocked") is None:
+        pass  # победный раунд: ответный удар не проходит
+    elif entry.get("blocked"):
+        lines.append(random.choice(get_text_list("battle.counter_blocked_phrases")).format(
+            player=player, enemy=enemy_name, counter=counter, block=block))
+    else:
+        lines.append(random.choice(get_text_list("battle.counter_hit_phrases")).format(
+            player=player, enemy=enemy_name, counter=counter, dmg=entry.get("dmg", 0)))
+    return "\n".join(lines)
+
+
+def _render_stats_block(battle: dict[str, Any]) -> str:
+    enemy = battle.get("enemy") or {}
+    rounds = int(battle.get("round", 0) or 0)
+    tier_labels = get_text_mapping("battle.tier_labels")
+    tier = enemy.get("tier", "common")
+    # .strip(): YAML-блок '| сохраняет перевод строки в конце — для раскладки
+    # отчёта пустые строки между секциями добавляет код.
     return get_text(
+        "battle.stats_block",
+        enemy=enemy.get("name", "?"),
+        tier=tier_labels.get(tier, tier),
+        hits=battle.get("hits", 0),
+        win_hits=enemy.get("win_hits", 1),
+        dmg=battle.get("dmg_taken", 0),
+        rounds=rounds,
+        rounds_word=_ru_plural(rounds, "раунд", "раунда", "раундов"),
+    ).strip()
+
+
+def _lore_line() -> str:
+    return get_text("battle.lore_line", lore=random.choice(get_text_list("battle.lore_quotes")))
+
+
+def _battle_message_text(battle: dict[str, Any]) -> str:
+    # .rstrip(): YAML-блок message оставляет хвостовой \n после {phase}
+    text = get_text(
         "battle.message",
         username=_battle_username(battle),
         enemy=(battle.get("enemy") or {}).get("name", "?"),
         status=_battle_status(battle),
         phase=_battle_phase_line(battle),
-    )
+    ).rstrip()
+    # Арт только что закончившегося раунда — как мгновенная реакция.
+    art = _round_art(battle)
+    if art:
+        text += "\n\n" + art
+    return text
 
 
 def _battle_intro_text(battle: dict[str, Any]) -> str:
@@ -657,7 +723,7 @@ def _journal_lines(battle: dict[str, Any]) -> list[str]:
         if entry.get("hit") and entry.get("blocked"):
             key = "battle.round_hit_blocked"
         elif entry.get("hit"):
-            key = "battle.round_hit_damaged"
+            key = "battle.round_win" if entry.get("blocked") is None else "battle.round_hit_damaged"
         elif entry.get("blocked"):
             key = "battle.round_miss_blocked"
         else:
@@ -676,49 +742,45 @@ def _journal_lines(battle: dict[str, Any]) -> list[str]:
 
 
 def _victory_report(battle: dict[str, Any], rewards: dict[str, Any]) -> str:
-    enemy = battle.get("enemy") or {}
-    enemy_name = enemy.get("name", "?")
-    rounds = int(battle.get("round", 0) or 0)
-    gender = _get_mob_gender(enemy_name)
-    key = {2: "battle.victory_f", 3: "battle.victory_n"}.get(gender, "battle.victory")
-
-    lines = [
-        get_text(
-            key,
-            username=_battle_username(battle),
-            enemy=enemy_name,
-            rounds=rounds,
-            rounds_word=_ru_plural(rounds, "раунд", "раунда", "раундов"),
-        )
-    ]
+    lines = [get_text("battle.victory_title", username=_battle_username(battle)), ""]
+    journal = battle.get("journal") or []
+    if journal:
+        lines.append(_round_art(battle, final=True, entry=journal[-1]))
+        lines.append("")
+    lines.append(_render_stats_block(battle))
+    lines.append("")
     if rewards.get("healed"):
         lines.append(get_text("battle.victory_heal", hp=rewards["healed"]))
-    lines.extend(_journal_lines(battle))
     lines.append(get_text("battle.reward_xp", xp=rewards.get("xp", 0)))
     for item in rewards.get("items") or []:
         lines.append(get_text("battle.reward_item", item=item.get("name"), count=item.get("quantity", 1)))
     if rewards.get("leveled_up"):
         lines.append("")
         lines.append(get_text("adventure.level_up", level=rewards.get("level"), max_hp=rewards.get("max_hp")))
+    lines.append("")
+    lines.append(get_text("battle.journal_header"))
+    lines.extend(_journal_lines(battle))
+    lines.append("")
+    lines.append(_lore_line())
     return "\n".join(lines)
 
 
 def _defeat_report(battle: dict[str, Any], rewards: dict[str, Any]) -> str:
-    enemy = (battle.get("enemy") or {})
-    rounds = int(battle.get("round", 0) or 0)
-    lines = [
-        get_text(
-            "battle.defeat",
-            username=_battle_username(battle),
-            enemy=enemy.get("name", "?"),
-            rounds=rounds,
-            rounds_word=_ru_plural(rounds, "раунд", "раунда", "раундов"),
-        )
-    ]
-    lines.extend(_journal_lines(battle))
+    lines = [get_text("battle.defeat_title", username=_battle_username(battle)), ""]
+    journal = battle.get("journal") or []
+    if journal:
+        lines.append(_round_art(battle, entry=journal[-1]))
+        lines.append("")
+    lines.append(_render_stats_block(battle))
+    lines.append("")
     for item in rewards.get("items") or []:
         lines.append(get_text("battle.defeat_loot", item=item.get("name")))
     lines.append(get_text("battle.defeat_end"))
+    lines.append("")
+    lines.append(get_text("battle.journal_header"))
+    lines.extend(_journal_lines(battle))
+    lines.append("")
+    lines.append(_lore_line())
     return "\n".join(lines)
 
 

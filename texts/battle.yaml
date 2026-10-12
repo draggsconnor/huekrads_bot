@@ -13,14 +13,14 @@ block_buttons:
 
 # Zone names for the round journal
 zone_attack_names:
-  head: "в голову"
-  body: "в торс"
-  dick: "по хую"
+  head: "в голову (🧠)"
+  body: "в торс (💪)"
+  dick: "по хую (🍆)"
 
 zone_block_names:
-  head: "голову"
-  body: "торс"
-  dick: "хуй"
+  head: "голову (🧠)"
+  body: "торс (💪)"
+  dick: "хуй (🍆)"
 
 # Battle intro (first message)
 intro_title: "⚔️ <b>{username} столкнулся с врагом!</b>"
@@ -48,23 +48,77 @@ late: "Фаза уже прошла — выбор не принят."
 # Round journal lines
 round_hit_blocked: "• Р{round}: ⚔️ бил {attack} — ПОПАЛ; 🛡 закрыл {block} — отбился"
 round_hit_damaged: "• Р{round}: ⚔️ бил {attack} — ПОПАЛ; 💥 пропустил ответку ({dmg} HP)"
+round_win: "• Р{round}: ⚔️ бил {attack} — ПОПАЛ; 💥 добивающий удар!"
 round_miss_blocked: "• Р{round}: 🚫 бил {attack} — враг закрылся; 🛡 закрыл {block} — отбился"
 round_miss_damaged: "• Р{round}: 🚫 бил {attack} — враг закрылся; 💥 пропустил ответку ({dmg} HP)"
 
-# Victory report
-victory: "🏆 <b>{username}</b>: {enemy} повержен за {rounds} {rounds_word}!"
-victory_f: "🏆 <b>{username}</b>: {enemy} повержена за {rounds} {rounds_word}!"
-victory_n: "🏆 <b>{username}</b>: {enemy} повержено за {rounds} {rounds_word}!"
+# Victory report (дуэльный стиль: арт решающего раунда сверху, потом итоги,
+# награды, хроника и байка в конце)
+victory_title: "🏆 <b>{username}</b> — ПОБЕДА!"
 victory_heal: "❤️‍🩹 Восстановлено после боя: +{hp} HP"
 reward_xp: "⭐ Опыт: +{xp}"
 reward_item: "🎒 Добыча: {item} x{count}"
 
 # Defeat report
-defeat: |
-  💀 <b>{username}</b>: гному надрали зад!
-  {enemy} оказался сильнее — бой длился {rounds} {rounds_word}.
+defeat_title: "💀 <b>{username}</b> — ГНОМ ПОВЕРЖЕН!"
 defeat_loot: "🎒 Обронил по дороге: {item}"
 defeat_end: "🏃 Экспедиция прервана досрочно, без опыта. Гном еле дополз домой (1 HP)."
+
+# Общий блок итогов для обоих отчётов
+stats_block: |
+  🗡 Итоги боя:
+
+  🎭 Враг: {enemy} [{tier}]
+  🎯 Попаданий: {hits}/{win_hits}
+  💥 Получено урона: {dmg} HP
+  📓 Длительность: {rounds} {rounds_word}
+journal_header: "📓 Хроника боя:"
+lore_line: "📖 <i>{lore}</i>"
+
+tier_labels:
+  common: "обычный"
+  uncommon: "необычный"
+  rare: "редкий"
+  boss: "босс"
+
+# Художественные каталоги: выбираются random.choice в коде (тексты — только данные)
+final_blow_phrases:
+  - "🔥 ФИНИШ! Гном {player} набирает полную мощь — и {enemy} складывается от удара {attack}!"
+  - "🔥 ПОБЕДНЫЙ БАМ! {enemy} ещё бормотал что-то гордое, но {player} уже вбивает {attack} со свистом!"
+  - "🔥 ЗАЧИСТКА! {player} выцеливает, сплёвывает на ладони и отправляет {enemy} в капусту — точно {attack}!"
+  - "🔥 ГНОМ НЕ ШУТИТ! Одно движение {player} — и {enemy} превращается в удобрение: {attack}, по всем канонам!"
+
+attack_hit_phrases:
+  - "🥊 ТОЧНО! Гном {player} приловчился — всаживает {attack}, и {enemy} возмущённо скрипит."
+  - "🥊 ПОПАЛ! {enemy} зазевался на пару пикселей, и {player} вбивает {attack} без задержки."
+  - "🥊 ГЛУБОКО! {player} не суетится — короткий замах, и {attack} доходит до {enemy} в самое нутро."
+  - "🥊 ПЛЕЧОМ! Гном {player} вкладывает всё смолистое тело — {enemy} принимает {attack} лично."
+
+attack_miss_phrases:
+  - "🚫 ПРОМАХ! Гном {player} бьёт {attack}, но {enemy} успевает закрыться."
+  - "🚫 ПУСТО! {attack} хлещет по воздуху: {player} мимо, а {enemy} цел."
+  - "🚫 ЗАКРЫТО! {player} целил {attack}, но {enemy} читал гнома, как открытку."
+
+counter_blocked_phrases:
+  - "🛡 ПРИНЯЛ! {enemy} целится {counter} — но блок {player} накрыл урон насмерть."
+  - "🛡 НА БРОНЮ! {player} выставил блок ({block}) и {counter} гаснет о гнома. {enemy} слегка расстроен."
+  - "🛡 ЧИСТО! {player} даже бровью не ведёт: блок там, где надо."
+
+counter_hit_phrases:
+  - "💥 АЙ! Ответка {enemy} {counter} — гном {player} теряет {dmg} HP и ругается вполголоса."
+  - "💥 ПРОПУСТИЛ! {player} не успел закрыть {counter} — минус {dmg} HP."
+  - "💥 ВСТРЕЧАЙ! {enemy} выцелил гнома и всаживает {counter} — минус {dmg} HP."
+  - "💥 ЖЁСТКО! {player} зазевался: {counter} на {dmg} HP улетает в самое тесто."
+
+lore_quotes:
+  - "Гномы-хуекрабы не ходят по лестницам."
+  - "Смола Барона сходит сама. Чеснок — нет."
+  - "Главное в экспедиции — вернуться. Остальное — по настроению."
+  - "Гном не боится темноты. Гном боится, что в темноте копает кто-то ещё."
+  - "Мёртвый моб — самый честный моб."
+  - "Хвоина против брони держится ровно один удар."
+  - "Дракон, конечно, силён. Но гном упрямее."
+  - "Страж шахты всегда прав. Особенно когда он тебя прижал."
 
 # Lines for the expedition final report
 report_defeated: "  • {mob_name} повержен за {rounds} {rounds_word}"

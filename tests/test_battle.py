@@ -598,11 +598,67 @@ class TestBattleReports:
         rewards = {"xp": 10, "items": [], "healed": 0, "leveled_up": False, "level": 1, "max_hp": 200}
         text = battle._victory_report(state, rewards)
         assert "tester" in text
-        assert "Куст повержен за 1 раунд" in text
+        assert "ПОБЕДА" in text
+        assert "Итоги боя" in text
+        assert "Хроника боя" in text
+        assert "Куст" in text
+
+    def test_victory_report_has_empty_line_between_sections(self):
+        state = _battle(username="tester", hits=1)
+        state["enemy"]["win_hits"] = 1
+        state["journal"] = [
+            {"round": 1, "attack": "body", "block": "head", "auto": False,
+             "hit": True, "blocked": None, "dmg": 0}
+        ]
+        rewards = {"xp": 10, "items": [], "healed": 0, "leveled_up": False, "level": 1, "max_hp": 200}
+        text = battle._victory_report(state, rewards)
+        # Секции разнесены пустыми строками (duel-style форматирование)
+        assert "\n\n" in text
+        assert "\n\n\n" not in text
 
     def test_defeat_report_contains_player(self):
         text = battle._defeat_report(_battle(username="tester"), {"items": []})
         assert "tester" in text
+        assert "ГНОМ ПОВЕРЖЕН" in text
+        assert "Итоги боя" in text
+        assert "Хроника боя" in text
+
+    def test_round_art_hit_with_counter(self):
+        state = _battle(username="tester")
+        state["journal"] = [
+            {"round": 1, "attack": "head", "block": "body", "auto": False,
+             "hit": True, "blocked": False, "dmg": 25,
+             "enemy_attack": "body", "enemy_block": "head"}
+        ]
+        text = battle._round_art(state, entry=state["journal"][0])
+        assert "tester" in text
+        assert "в голову" in text            # зона атаки
+        assert "в торс" in text              # ответка врага
+        assert "25" in text                  # урон
+        assert "\n" in text                  # атака и ответка — на разных строках
+
+    def test_round_art_win_hit_cancels_counter(self):
+        state = _battle(username="tester")
+        state["journal"] = [
+            {"round": 2, "attack": "dick", "block": "head", "auto": False,
+             "hit": True, "blocked": None, "dmg": 0,
+             "enemy_attack": "head", "enemy_block": "body"}
+        ]
+        text = battle._round_art(state, final=True, entry=state["journal"][0])
+        assert "🔥" in text                  # каталог финального удара
+        assert "по хую" in text
+        assert "\n" not in text              # победный хит гасит ответку — одна строка
+
+    def test_message_contains_last_round_art(self):
+        state = _battle(username="tester")
+        state["journal"] = [
+            {"round": 1, "attack": "head", "block": "body", "auto": False,
+             "hit": False, "blocked": False, "dmg": 25,
+             "enemy_attack": "body", "enemy_block": "head"}
+        ]
+        text = battle._battle_message_text(state)
+        assert "tester против Куст" in text
+        assert "в голову" in text            # арт прошлого раунда в фазовом сообщении
 
     def test_username_fallback(self):
         state = _battle()
