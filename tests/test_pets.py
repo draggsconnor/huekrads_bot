@@ -331,6 +331,14 @@ class TestHuecrabCard:
         assert "Питомца пока нет" in text
         assert "ВЫЛУПИТЬ" in text
 
+    def test_card_rename_hint_is_html_safe(self, tmp_path, monkeypatch):
+        """Строка с <имя> больше не кладёт HTML-парсинг Telegram (регресс)."""
+        player = {"pet": {"id": "piebald_crab", "name": "🦀 Пёстрый хуекраб",
+                          "perks": {}, "level": 1, "xp": 0}}
+        text = pets.render_huecrab_card(player)
+        assert "&lt;имя&gt;" in text
+        assert "<имя>" not in text
+
     async def test_command_renders_card(self, tmp_path, monkeypatch, fake_context):
         _setup(tmp_path, monkeypatch, {
             "hp": 200, "max_hp": 200, "lvl": 1,
