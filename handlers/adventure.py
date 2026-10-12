@@ -35,7 +35,10 @@ logger = logging.getLogger(__name__)
 # Paths
 # ---------------------------------------------------------------------------
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))ADVENTURE_DIR = os.path.join(BASE_DIR, "data", "adventure")
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ADVENTURE_DIR = os.path.join(BASE_DIR, "data", "adventure")
+# Отбивка по итогу экспедиции живёт дольше остальных ответов — итоги прочитать успеть.
+EXPEDITION_RESULT_DELETE_DELAY = 120
 PERSIST_DIR = os.path.join(BASE_DIR, "persist")
 
 LOCATIONS_PATH = os.path.join(ADVENTURE_DIR, "locations.json")
@@ -1264,5 +1267,5 @@ async def send_expedition_result(user_id: int, loc_id: str | None, username: str
     except Exception as e:
         logger.error(f"Error sending expedition completion to chat {target_chat_id}: {e}")
         return
-    # Отбивка по итогу экспедиции видна минуту, потом бот её убирает.
-    await schedule_self_delete(context, sent)
+    # Отбивка по итогу экспедиции живёт две минуты — итоги надо успеть прочитать.
+    await schedule_self_delete(context, sent, EXPEDITION_RESULT_DELETE_DELAY)

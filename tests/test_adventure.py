@@ -248,6 +248,37 @@ class TestAdventureStatsXpLeft:
         assert "⬆️ До левелапа (ур. 2): 60 XP" in text
 
 
+class TestExpeditionResultCleanup:
+    async def test_result_message_deleted_after_2min(self, tmp_path, monkeypatch, fake_context):
+        """Итоговый отчёт экспедиции живёт 120 секунд (не минуту)."""
+        from handlers import utils
+
+        data_path = tmp_path / "player_data.json"
+        with open(data_path, "w", encoding="utf-8") as f:
+            json.dump({"123": {
+                "hp": 200, "max_hp": 200, "lvl": 1, "xp": 0,
+                "active_expedition": {
+                    "location_id": "dark_forest",
+                    "username": "Tester",
+                    "chat_id": -42,
+                    "battle_log": [],
+                },
+            }}, f, ensure_ascii=False)
+        monkeypatch.setattr(adv, "PLAYER_DATA_PATH", str(data_path))
+        fake_context.bot.send_message = AsyncMock(
+            return_value=SimpleNamespace(chat_id=-42, message_id=101),
+        )
+
+        await adv.send_expedition_result(123, None, "Tester", fake_context)
+
+        scheduled = [
+            call for call in fake_context.job_queue.calls
+            if call[0] is utils.self_delete_job
+        ]
+        entries = sorted((call[1], call[2]["data"]["message_id"]) for call in scheduled)
+        assert entries == [(120, 101)]
+
+
 class TestLeadingEmoji:
     def test_does_not_duplicate_first_letter(self):
         # было: '🌲Охуенно тёмный лес'[:2] -> '🌲О' + 'Охуенно…' -> 'ООхуенно'
