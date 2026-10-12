@@ -207,6 +207,25 @@ EMPTY_LOCATIONS = {
 }
 
 
+class TestRollResources:
+    def test_multi_drop_eggs(self, tmp_path, monkeypatch):
+        from tests.test_battle import FakeRandom
+
+        # random()=0.0 -> бросок успешен; randint(min,max)=min -> 2 яйца.
+        monkeypatch.setattr(adv, "random", FakeRandom(0.0))
+        loc = {"resources": [{
+            "id": "pet_egg", "name": "🥚 Яйцо питомца",
+            "chance": 1.0, "quantity_min": 2, "quantity_max": 3,
+        }]}
+        resources = adv._roll_resources(loc)
+        assert [r["name"] for r in resources] == ["🥚 Яйцо питомца", "🥚 Яйцо питомца"]
+        assert all(r["quantity"] == 1 for r in resources)
+
+    def test_default_single(self):
+        loc = {"resources": [{"id": "res", "name": "🌿 Хвоя", "chance": 1.0}]}
+        assert adv._roll_resources(loc) == [{"name": "🌿 Хвоя", "quantity": 1}]
+
+
 class TestLeadingEmoji:
     def test_does_not_duplicate_first_letter(self):
         # было: '🌲Охуенно тёмный лес'[:2] -> '🌲О' + 'Охуенно…' -> 'ООхуенно'

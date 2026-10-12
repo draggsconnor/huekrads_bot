@@ -75,6 +75,8 @@
         "name": "🥚 Яйцо питомца",
         "description": "Из него может вылупиться что-то полезное.",
         "chance": 0.99,
+        "quantity_min": 2,
+        "quantity_max": 3,
         "rarity": "rare"
       },
       {

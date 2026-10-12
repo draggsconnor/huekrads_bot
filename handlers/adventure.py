@@ -753,14 +753,19 @@ def _ensure_player_defaults(player: dict[str, Any]) -> None:
 
 
 def _roll_resources(loc: dict[str, Any]) -> list[dict[str, Any]]:
-    """Roll the location's resource drop table."""
+    """Roll the location's resource drop table.
+
+    quantity_min/quantity_max в записи ресурса — сколько единиц падает
+    за один бросок (каждая — отдельная запись инвентаря).
+    """
     resources = []
     for resource in loc.get("resources", []) or []:
         if random.random() < resource.get("chance", 0):
-            resources.append({
-                "name": resource.get("name", resource.get("id", "Unknown")),
-                "quantity": 1,
-            })
+            name = resource.get("name", resource.get("id", "Unknown"))
+            qty_min = int(resource.get("quantity_min", 1) or 1)
+            qty_max = int(resource.get("quantity_max", qty_min) or qty_min)
+            for _ in range(max(1, random.randint(qty_min, qty_max))):
+                resources.append({"name": name, "quantity": 1})
     return resources
 
 

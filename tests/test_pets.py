@@ -2,6 +2,10 @@ import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import json
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
 import handlers.adventure as adv
 import handlers.pets as pets
 from handlers import utils
@@ -37,7 +41,92 @@ def _read(data_path):
         return json.load(f)["123"]
 
 
-class TestHatchPet:
+class TestNamePet:
+    def _setup(self, tmp_path, monkeypatch, player):
+        data_path = tmp_path / "player_data.json"
+        with open(data_path, "w", encoding="utf-8") as f:
+            json.dump({"123": player}, f, ensure_ascii=False)
+        monkeypatch.setattr(adv, "PLAYER_DATA_PATH", str(data_path))
+
+        pets_path = tmp_path / "pets.json"
+        with open(pets_path, "w", encoding="utf-8") as f:
+            json.dump(PETS, f, ensure_ascii=False)
+        monkeypatch.setattr(pets, "PETS_PATH", str(pets_path))
+        return data_path
+
+    def _read(self, data_path):
+        with open(data_path, encoding="utf-8") as f:
+            return json.load(f)["123"]
+
+    def test_name_once_then_locked(self, tmp_path, monkeypatch):
+        data_path = self._setup(tmp_path, monkeypatch, {
+            "hp": 200, "max_hp": 200,
+            "pet": {"id": "piebald_crab", "name": "🦀 Пёстрый хуекраб", "perks": {}},
+            "inventory": [],
+        })
+
+        result = pets.name_pet(123, "Клобук")
+        assert result == {"event": "named", "name": "Клобук"}
+        stored = self._read(data_path)["pet"]
+        assert stored["name"] == "Клобук"
+        assert stored["renamed"] is True
+
+        again = pets.name_pet(123, "Другое Имя")
+        assert again["event"] == "already_named"
+        assert again["name"] == "Клобук"
+        assert self._read(data_path)["pet"]["name"] == "Клобук"
+
+    def test_name_trims_and_caps(self, tmp_path, monkeypatch):
+        self._setup(tmp_path, monkeypatch, {
+            "hp": 200, "max_hp": 200,
+            "pet": {"id": "piebald_crab", "name": "🦀 Краб", "perks": {}},
+            "inventory": [],
+        })
+        long_name = "Й" * 30
+        result = pets.name_pet(123, f"  {long_name}  ")
+        assert result["event"] == "named"
+        assert len(result["name"]) == 24
+
+    def test_name_requires_pet(self, tmp_path, monkeypatch):
+        self._setup(tmp_path, monkeypatch, {"hp": 200, "max_hp": 200, "inventory": []})
+        assert pets.name_pet(123, "Краб")["event"] == "empty"
+
+    def test_name_rejects_blank(self, tmp_path, monkeypatch):
+        data_path = self._setup(tmp_path, monkeypatch, {
+            "hp": 200, "max_hp": 200,
+            "pet": {"id": "piebald_crab", "name": "🦀 Краб", "perks": {}},
+            "inventory": [],
+        })
+        assert pets.name_pet(123, "   ") == {"event": "empty_name"}
+        assert not self._read(data_path)["pet"].get("renamed")
+
+
+class TestHuecrabNameCommand:
+    async def test_cmd_names_pet(self, tmp_path, monkeypatch, fake_context):
+        data_path = tmp_path / "player_data.json"
+        with open(data_path, "w", encoding="utf-8") as f:
+            json.dump({"123": {
+                "hp": 200, "max_hp": 200, "lvl": 1,
+                "pet": {"id": "piebald_crab", "name": "🦀 Пёстрый хуекраб", "perks": {}},
+            }}, f, ensure_ascii=False)
+        monkeypatch.setattr(adv, "PLAYER_DATA_PATH", str(data_path))
+
+        reply = AsyncMock(return_value=SimpleNamespace(chat_id=-42, message_id=320))
+        fake_context.args = ["Ага", "Сосиск"]  # как PTB подкладывает аргументы команды
+        await pets.adventure_huecrab_name_command(
+            SimpleNamespace(
+                effective_user=SimpleNamespace(id=123),
+                effective_message=SimpleNamespace(chat_id=-42, message_id=319, reply_text=reply),
+            ),
+            fake_context,
+        )
+        assert "Ага Сосиск" in reply.await_args.args[0]
+        stored = json.load(open(data_path, encoding="utf-8"))["123"]
+        assert stored["pet"]["name"] == "Ага Сосиск"
+        assert stored["pet"]["renamed"] is True
+
+
+class TestHatchPetReplacement:
     def test_hatch_consumes_egg_and_assigns_pet(self, tmp_path, monkeypatch):
         monkeypatch.setattr(pets, "random", FakeRandom(0.0))  # первый вид из реестра
         data_path = _setup(tmp_path, monkeypatch, {

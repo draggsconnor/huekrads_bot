@@ -86,6 +86,31 @@ def perk_lines(perks: dict[str, Any]) -> list[str]:
     return lines
 
 
+def name_pet(user_id: int, pet_name: str) -> dict[str, Any]:
+    """Назвать питомца — ровно один раз (CAS по pet.renamed)."""
+    pet_name = " ".join((pet_name or "").split())[:24]
+    if not pet_name:
+        return {"event": "empty_name"}
+
+    with _EXPEDITION_LOCK:
+        data = load_player_data()
+        player = data.get(_player_key(user_id))
+        if not isinstance(player, dict):
+            return {"event": "empty"}
+        _ensure_player_defaults(player)
+
+        pet = player.get("pet")
+        if not isinstance(pet, dict) or not pet.get("name"):
+            return {"event": "empty"}
+        if pet.get("renamed"):
+            return {"event": "already_named", "name": pet.get("name")}
+
+        pet["name"] = pet_name
+        pet["renamed"] = True
+        save_player_data(data)
+        return {"event": "named", "name": pet_name}
+
+
 def render_huecrab_card(player: dict[str, Any]) -> str:
     """Карточка питомца для /adventure_huecrab (описание, перки, уровень)."""
     pet = player.get("pet")
@@ -106,7 +131,41 @@ def render_huecrab_card(player: dict[str, Any]) -> str:
         level=level, xp=xp, to_next=pet_xp_for_next_level(level),
     ))
     lines.extend(perk_lines(pet.get("perks") or {}))
+    if not pet.get("renamed"):
+        lines.append("")
+        lines.append(get_text("pets.rename_hint"))
     return "\n".join(lines)
+
+
+async def adventure_huecrab_name_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/adventure_huecrab_name <имя> — назвать хуекраба (один раз)."""
+    from html import escape
+
+    user = update.effective_user
+    if not user or not update.effective_message:
+        return
+
+    # Уборка: команда и ответ бота живут минуту.
+    await schedule_self_delete(context, update.effective_message)
+
+    args = " ".join(context.args or []).strip()
+    if not args:
+        await update.effective_message.reply_text(
+            get_text("pets.name_usage"),
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    result = name_pet(user.id, args)
+    if result.get("event") == "empty":
+        text = get_text("pets.name_need_pet")
+    elif result.get("event") == "already_named":
+        text = get_text("pets.name_already", name=escape(result.get("name", "")))
+    elif result.get("event") == "named":
+        text = get_text("pets.name_set", name=escape(result["name"]))
+    else:  # empty_name — не должно случаться (args непусты)
+        text = get_text("pets.name_usage")
+    await update.effective_message.reply_text(text, parse_mode=ParseMode.HTML)
 
 
 async def adventure_huecrab_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
