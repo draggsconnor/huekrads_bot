@@ -673,7 +673,7 @@ class TestBattleReports:
         ]
         text = battle._round_art(state, final=True, entry=state["journal"][0])
         assert "🔥" in text                  # каталог финального удара
-        assert "по хую" in text
+        assert "в хуй" in text
         assert "\n" not in text              # победный хит гасит ответку — одна строка
 
     def test_message_contains_last_round_art(self):
