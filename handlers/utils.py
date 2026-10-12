@@ -141,6 +141,11 @@ async def self_delete_job(context: ContextTypes.DEFAULT_TYPE) -> None:
         )
 
 
+def self_delete_job_name(chat_id: int, message_id: int) -> str:
+    """Отслеживаемое имя джобы очистки для пары (chat, message)."""
+    return f"self_delete_{chat_id}_{message_id}"
+
+
 async def schedule_self_delete(
     context: ContextTypes.DEFAULT_TYPE,
     message,
@@ -157,6 +162,26 @@ async def schedule_self_delete(
     context.job_queue.run_once(
         self_delete_job,
         delay_seconds,
-        name=f"self_delete_{message.chat_id}_{message.message_id}",
+        name=self_delete_job_name(message.chat_id, message.message_id),
         data={"chat_id": message.chat_id, "message_id": message.message_id},
+    )
+
+
+async def redirect_self_delete(
+    context: ContextTypes.DEFAULT_TYPE,
+    chat_id: int,
+    message_id: int,
+    delay_seconds: int,
+) -> None:
+    """Перепланировать очистку конкретного сообщения (та же джоба, новый срок)."""
+    if not context.job_queue:
+        return
+    name = self_delete_job_name(chat_id, message_id)
+    for job in context.job_queue.get_jobs_by_name(name):
+        job.schedule_removal()
+    context.job_queue.run_once(
+        self_delete_job,
+        delay_seconds,
+        name=name,
+        data={"chat_id": chat_id, "message_id": message_id},
     )

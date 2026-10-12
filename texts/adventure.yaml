@@ -321,6 +321,18 @@ adventure_inventory_title: "🎒 <b>Инвентарь экспедиций</b>"
 adventure_inventory_no_items: "Пусто..."
 adventure_inventory_item: "• {name}: {count} шт."
 inventory_item_desc: "      <i>{desc}</i>"
+inventory_edible_footer: "🍽 Есть съедобное — кнопка ИСПОЛЬЗОВАТЬ."
+inventory_use_button: "🍽 ИСПОЛЬЗОВАТЬ"
+inventory_eat_panel: |
+  🍽 Чего слопаем?
+
+  ❤️ HP: {current}/{max_hp}
+inventory_eat_button: "{item} x{count} (+{hp} HP)"
+inventory_eat_cancel: "◀️ Отмена"
+inventory_eat_result: "😋 Гном вглотнул {item}: +{healed} HP (❤️ {current}/{max_hp})"
+inventory_eat_missing: "Этот фрукт уже кончился."
+inventory_not_your: "Это не твой инвентарь."
+inventory_battle_busy: "⚔️ Гном дерётся — некогда жевать!"
 
 # Stats
 adventure_stats_title: "📊 <b>Статистика экспедиций</b>"

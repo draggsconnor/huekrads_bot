@@ -1,6 +1,9 @@
-import pytest
+import json
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 from datetime import datetime, timedelta, timezone
-from unittest.mock import MagicMock, patch
+
+import pytest
 
 import handlers.adventure as adv
 
@@ -214,6 +217,224 @@ class TestLeadingEmoji:
 
     def test_fallback_for_missing_display_name(self):
         assert adv._leading_emoji("") == "🌲"
+
+
+class TestEatInventory:
+    """Ядро поедания фруктов (adventure.eat_inventory_item)"""
+
+    EAT_POOL = {
+        "mandarin": {"name": "🍊 Мандарин Храбрости", "heal_hp": 40},
+        "rotten_melon": {"name": "🍈 Гнилая дыня", "heal_hp": 100},
+        "herb": {"name": "🌿 Трава"},  # несъедобно: нет heal_hp
+    }
+
+    def _setup(self, tmp_path, monkeypatch, player):
+        data_path = tmp_path / "player_data.json"
+        with open(data_path, "w", encoding="utf-8") as f:
+            json.dump({"123": player}, f, ensure_ascii=False)
+        monkeypatch.setattr(adv, "PLAYER_DATA_PATH", str(data_path))
+
+        pool_path = tmp_path / "global_pool.json"
+        with open(pool_path, "w", encoding="utf-8") as f:
+            json.dump({"items": self.EAT_POOL}, f, ensure_ascii=False)
+        monkeypatch.setattr(adv, "GLOBAL_POOL_PATH", str(pool_path))
+        return data_path
+
+    def _read(self, data_path):
+        with open(data_path, encoding="utf-8") as f:
+            return json.load(f)["123"]
+
+    def test_eat_heals_and_caps(self, tmp_path, monkeypatch):
+        data_path = self._setup(tmp_path, monkeypatch, {
+            "hp": 100, "max_hp": 200,
+            "inventory": [
+                {"name": "🍊 Мандарин Храбрости", "quantity": 1},
+                {"name": "🍊 Мандарин Храбрости", "quantity": 1},
+                {"name": "🍊 Мандарин Храбрости", "quantity": 1},
+                {"name": "🌿 Трава", "quantity": 1},
+            ],
+        })
+        mandarin = adv._item_hash("🍊 Мандарин Храбрости")
+
+        r1 = adv.eat_inventory_item(123, mandarin)
+        assert r1["event"] == "eaten"
+        assert r1["healed"] == 40
+        assert r1["current"] == 140
+
+        r2 = adv.eat_inventory_item(123, mandarin)
+        assert r2["current"] == 180
+
+        # Третий доходит только да капа: 180 + 20 из 40.
+        r3 = adv.eat_inventory_item(123, mandarin)
+        assert r3["healed"] == 20
+        assert r3["current"] == 200
+
+        stored = self._read(data_path)
+        assert len([i for i in stored["inventory"] if "Мандарин" in i["name"]]) == 0
+        assert stored["hp"] == 200
+
+        # Всё съедено — нельзя.
+        r4 = adv.eat_inventory_item(123, mandarin)
+        assert r4["event"] == "empty"
+
+    def test_eat_blocked_during_battle(self, tmp_path, monkeypatch):
+        data_path = self._setup(tmp_path, monkeypatch, {
+            "hp": 100, "max_hp": 200,
+            "active_battle": {"battle_id": "abc"},
+            "inventory": [{"name": "🍈 Гнилая дыня", "quantity": 1}],
+        })
+        melon = adv._item_hash("🍈 Гнилая дыня")
+
+        result = adv.eat_inventory_item(123, melon)
+        assert result == {"event": "battle"}
+        assert self._read(data_path)["inventory"]  # дыня на месте
+
+    def test_eat_rejects_non_edible_and_wrong_hash(self, tmp_path, monkeypatch):
+        self._setup(tmp_path, monkeypatch, {
+            "hp": 100, "max_hp": 200,
+            "inventory": [{"name": "🌿 Трава", "quantity": 1}],
+        })
+        herba = adv._item_hash("🌿 Трава")
+        assert adv.eat_inventory_item(123, herba)["event"] == "empty"
+
+        garbage = adv.eat_inventory_item(123, "00000000")
+        assert garbage["event"] == "empty"
+
+
+class TestInventoryEatFlow:
+    """Кнопки использования в инвентаре (invt_*)"""
+
+    async def test_use_and_eat_flow(self, tmp_path, monkeypatch, fake_context):
+        from handlers import utils
+        import handlers.adventure as adventure
+
+        data_path = tmp_path / "player_data.json"
+        data_path.write_text(json.dumps({"1001": {
+            "hp": 100, "max_hp": 200, "lvl": 1,
+            "inventory": [
+                {"name": "🍊 Мандарин Храбрости", "quantity": 1},
+                {"name": "🍊 Мандарин Храбрости", "quantity": 1},
+            ],
+        }}, ensure_ascii=False), encoding="utf-8")
+        monkeypatch.setattr(adventure, "PLAYER_DATA_PATH", str(data_path))
+
+        pool_path = tmp_path / "global_pool.json"
+        pool_path.write_text(json.dumps({"items": {
+            "mandarin": {"name": "🍊 Мандарин Храбрости", "heal_hp": 40},
+        }}, ensure_ascii=False), encoding="utf-8")
+        monkeypatch.setattr(adventure, "GLOBAL_POOL_PATH", str(pool_path))
+
+        # 1) /adventure_inventory: у ответа есть кнопка ИСПОЛЬЗОВАТЬ.
+        reply = AsyncMock(return_value=SimpleNamespace(chat_id=-42, message_id=200))
+        command_update = SimpleNamespace(
+            effective_user=SimpleNamespace(id=1001),
+            effective_message=SimpleNamespace(chat_id=-42, message_id=199, reply_text=reply),
+        )
+        await adventure.adventure_inventory_command(command_update, fake_context)
+
+        markup = reply.await_args.kwargs["reply_markup"]
+        texts = [b.text for row in markup.inline_keyboard for b in row]
+        assert any("ИСПОЛЬЗОВАТЬ" in t for t in texts)
+
+        # 2) ИСПОЛЬЗОВАТЬ: пикер + перенос очистки на 5 минут.
+        query = SimpleNamespace(
+            data="invt_1001_use", answer=AsyncMock(), edit_message_text=AsyncMock(),
+            message=SimpleNamespace(chat_id=-42, message_id=200),
+        )
+        await adventure.inventory_callback(
+            SimpleNamespace(callback_query=query, effective_user=SimpleNamespace(id=1001)),
+            fake_context,
+        )
+        panel = query.edit_message_text.await_args.kwargs
+        assert "Чего слопаем" in panel["text"]
+        panel_texts = [b.text for row in panel["reply_markup"].inline_keyboard for b in row]
+        assert any("x2 (+40 HP)" in t for t in panel_texts)
+        assert any("Отмена" in t for t in panel_texts)
+        assert any(
+            call[0] is utils.self_delete_job and call[1] == 300
+            for call in fake_context.job_queue.calls
+        )
+
+    async def test_eat_updates_picker_and_player(self, tmp_path, monkeypatch, fake_context):
+        import handlers.adventure as adventure
+
+        data_path = tmp_path / "player_data.json"
+        data_path.write_text(json.dumps({"1001": {
+            "hp": 100, "max_hp": 200, "lvl": 1,
+            "inventory": [{"name": "🍊 Мандарин Храбрости", "quantity": 1}],
+        }}, ensure_ascii=False), encoding="utf-8")
+        monkeypatch.setattr(adventure, "PLAYER_DATA_PATH", str(data_path))
+
+        pool_path = tmp_path / "global_pool.json"
+        pool_path.write_text(json.dumps({"items": {
+            "mandarin": {"name": "🍊 Мандарин Храбрости", "heal_hp": 40},
+        }}, ensure_ascii=False), encoding="utf-8")
+        monkeypatch.setattr(adventure, "GLOBAL_POOL_PATH", str(pool_path))
+
+        mandarin = adventure._item_hash("🍊 Мандарин Храбрости")
+        query = SimpleNamespace(
+            data=f"invt_1001_eat_{mandarin}", answer=AsyncMock(), edit_message_text=AsyncMock(),
+            message=SimpleNamespace(chat_id=-42, message_id=200),
+        )
+        await adventure.inventory_callback(
+            SimpleNamespace(callback_query=query, effective_user=SimpleNamespace(id=1001)),
+            fake_context,
+        )
+
+        shown = query.edit_message_text.await_args.kwargs["text"]
+        assert "+40 HP" in shown and "140/200" in shown
+        # Съел последний фрукт — пикер свернулся, показан обычный инвентарь.
+        assert "Чего слопаем" not in shown
+        assert "Пусто..." in shown
+        assert query.edit_message_text.await_args.kwargs["reply_markup"] is None
+
+        stored = json.load(open(data_path, encoding="utf-8"))["1001"]
+        assert stored["hp"] == 140
+        assert stored["inventory"] == []
+
+    async def test_not_your_inventory(self, tmp_path, monkeypatch, fake_context):
+        import handlers.adventure as adventure
+
+        query = SimpleNamespace(data="invt_999_use", answer=AsyncMock(), edit_message_text=AsyncMock())
+        await adventure.inventory_callback(
+            SimpleNamespace(callback_query=query, effective_user=SimpleNamespace(id=1001)),
+            fake_context,
+        )
+        query.answer.assert_awaited_once_with("Это не твой инвентарь.")
+        query.edit_message_text.assert_not_awaited()
+
+    async def test_cancel_back_to_inventory(self, tmp_path, monkeypatch, fake_context):
+        from handlers import utils
+        import handlers.adventure as adventure
+
+        data_path = tmp_path / "player_data.json"
+        data_path.write_text(json.dumps({"1001": {
+            "hp": 100, "max_hp": 200, "lvl": 1,
+            "inventory": [{"name": "🍊 Мандарин Храбрости", "quantity": 1}],
+        }}, ensure_ascii=False), encoding="utf-8")
+        monkeypatch.setattr(adventure, "PLAYER_DATA_PATH", str(data_path))
+
+        pool_path = tmp_path / "global_pool.json"
+        pool_path.write_text(json.dumps({"items": {
+            "mandarin": {"name": "🍊 Мандарин Храбрости", "heal_hp": 40},
+        }}, ensure_ascii=False), encoding="utf-8")
+        monkeypatch.setattr(adventure, "GLOBAL_POOL_PATH", str(pool_path))
+
+        query = SimpleNamespace(
+            data="invt_1001_cancel", answer=AsyncMock(), edit_message_text=AsyncMock(),
+            message=SimpleNamespace(chat_id=-42, message_id=200),
+        )
+        await adventure.inventory_callback(
+            SimpleNamespace(callback_query=query, effective_user=SimpleNamespace(id=1001)),
+            fake_context,
+        )
+
+        text = query.edit_message_text.await_args.kwargs["text"]
+        assert "Инвентарь экспедиций" in text
+        assert any(
+            call[0] is utils.self_delete_job and call[1] == 60
+            for call in fake_context.job_queue.calls
+        )
 
 
 class TestClaimActiveExpedition:

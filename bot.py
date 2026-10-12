@@ -15,6 +15,7 @@ from handlers.adventure import (
     adventure_command,
     adventure_inventory_command,
     adventure_stats_command,
+    inventory_callback,
 )
 from handlers.adventure_expiration_checker import expedition_expiration_job
 from handlers.battle import battle_callback, battle_watcher_job
@@ -105,6 +106,12 @@ def main() -> None:
         CallbackQueryHandler(
             battle_callback,
             pattern=r"^advb_",
+        )
+    )
+    application.add_handler(
+        CallbackQueryHandler(
+            inventory_callback,
+            pattern=r"^invt_",
         )
     )
     application.add_error_handler(error_handler)

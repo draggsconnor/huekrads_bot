@@ -8,6 +8,7 @@ Uses:
   texts/adventure.yaml            — user-facing texts
 """
 
+import hashlib
 import json
 import logging
 import os
@@ -21,7 +22,11 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes, CommandHandler
 from telegram.constants import ParseMode
 
-from handlers.utils import schedule_self_delete
+from handlers.utils import (
+    DEFAULT_DELETE_DELAY,
+    redirect_self_delete,
+    schedule_self_delete,
+)
 from text_resources import get_text, get_text_list
 
 logger = logging.getLogger(__name__)
@@ -134,6 +139,10 @@ def update_player(user_id: int, **fields) -> None:
 # Serializes claim-style operations on the JSON player store so that a
 # completion can never race with a cancellation or a second completion.
 _EXPEDITION_LOCK = threading.Lock()
+
+# Окно интерактива поедания в инвентаре: на это время пересаживаем
+# очистную джобу сообщения (по умолчанию чистим через минуту).
+EAT_SESSION_SECONDS = 300
 
 
 def parse_expedition_time(value: Any) -> datetime | None:
@@ -890,24 +899,86 @@ async def adventure_stats_command(update: Update, context: ContextTypes.DEFAULT_
     await schedule_self_delete(context, message)
 
 
-async def adventure_inventory_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle /adventure_inventory command - show player inventory."""
-    user = update.effective_user
-    if not user:
-        return
-    
-    player = get_player(user.id)
+def _item_hash(item_name: str) -> str:
+    """Короткий стабильный хеш имени предмета (для callback_data)."""
+    return hashlib.sha1(item_name.encode("utf-8")).hexdigest()[:8]
+
+
+def _construct_edibles(player: dict[str, Any]) -> list[dict[str, Any]]:
+    """Съедобные предметы инвентаря: есть в каталоге с heal_hp и в запасе."""
+    catalog = load_global_pool().get("items") or {}
+    counts: dict[str, int] = {}
+    for item in player.get("inventory", []):
+        name = item.get("name")
+        if name:
+            counts[name] = counts.get(name, 0) + 1
+
+    edibles = []
+    for entry in catalog.values():
+        heal = entry.get("heal_hp")
+        name = entry.get("name")
+        count = counts.get(name) if name else None
+        if not heal or not name or not count:
+            continue
+        edibles.append({
+            "name": name,
+            "count": count,
+            "heal_hp": int(heal),
+            "hash": _item_hash(name),
+        })
+    edibles.sort(key=lambda e: e["name"])
+    return edibles
+
+
+def eat_inventory_item(user_id: int, name_hash: str) -> dict[str, Any]:
+    """Атомарно слопать один экземпляр предмета инвентаря.
+
+    Возвращает {"event": "eaten", item, healed, current, max_hp},
+    {"event": "battle"} — во время отрыжки боя нельзя, или
+    {"event": "empty"} — не съедобно / уже кончилось.
+    """
+    with _EXPEDITION_LOCK:
+        data = load_player_data()
+        player = data.get(_player_key(user_id))
+        if not isinstance(player, dict):
+            return {"event": "empty"}
+        _ensure_player_defaults(player)
+
+        if isinstance(player.get("active_battle"), dict):
+            return {"event": "battle"}
+
+        edibles = _construct_edibles(player)
+        entry = next((e for e in edibles if e["hash"] == name_hash), None)
+        if entry is None:
+            return {"event": "empty"}
+
+        inventory = player.get("inventory", [])
+        for idx, item in enumerate(inventory):
+            if item.get("name") == entry["name"]:
+                del inventory[idx]
+                break
+
+        max_hp = int(player.get("max_hp", 200))
+        before = int(player.get("hp", 0))
+        healed = min(entry["heal_hp"], max_hp - before)
+        player["hp"] = min(max_hp, before + entry["heal_hp"])
+        save_player_data(data)
+        return {
+            "event": "eaten",
+            "item": entry["name"],
+            "healed": healed,
+            "current": player["hp"],
+            "max_hp": max_hp,
+        }
+
+
+def _render_inventory(player: dict[str, Any]) -> str:
+    """Текст инвентаря (общий для команды и для правок после укуса)."""
     inventory = player.get("inventory", [])
-    
-    # Build inventory message
-    inventory_lines = [
-        _get_text("adventure.adventure_inventory_title"),
-        ""
-    ]
-    
+    lines = [_get_text("adventure.adventure_inventory_title"), ""]
+
     if inventory:
-        # Group inventory items by name
-        inventory_counts = {}
+        inventory_counts: dict[str, int] = {}
         for item in inventory:
             item_name = item.get("name", "Unknown")
             inventory_counts[item_name] = inventory_counts.get(item_name, 0) + 1
@@ -919,20 +990,174 @@ async def adventure_inventory_command(update: Update, context: ContextTypes.DEFA
                 descriptions[entry["name"]] = entry["description"]
 
         for item_name, count in sorted(inventory_counts.items()):
-            inventory_lines.append(_get_text("adventure.adventure_inventory_item", name=item_name, count=count))
+            lines.append(_get_text("adventure.adventure_inventory_item", name=item_name, count=count))
             desc = descriptions.get(item_name)
             if desc:
-                inventory_lines.append(_get_text("adventure.inventory_item_desc", desc=desc))
+                lines.append(_get_text("adventure.inventory_item_desc", desc=desc))
     else:
-        inventory_lines.append(_get_text("adventure.adventure_inventory_no_items"))
-    
+        lines.append(_get_text("adventure.adventure_inventory_no_items"))
+
+    if _construct_edibles(player):
+        lines.append("")
+        lines.append(_get_text("adventure.inventory_edible_footer"))
+
+    return "\n".join(lines)
+
+
+def _inventory_keyboard(user_id: int, player: dict[str, Any]):
+    if not _construct_edibles(player):
+        return None
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton(
+            _get_text("adventure.inventory_use_button"),
+            callback_data=f"invt_{user_id}_use",
+        )
+    ]])
+
+
+def _render_eat_panel(player: dict[str, Any]) -> str:
+    return _get_text(
+        "adventure.inventory_eat_panel",
+        current=player.get("hp", 0),
+        max_hp=player.get("max_hp", 200),
+    )
+
+
+def _eat_keyboard(user_id: int, edibles: list[dict[str, Any]]) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(
+            _get_text(
+                "adventure.inventory_eat_button",
+                item=e["name"], count=e["count"], hp=e["heal_hp"],
+            ),
+            callback_data=f"invt_{user_id}_eat_{e['hash']}",
+        )]
+        for e in edibles
+    ]
+    rows.append([InlineKeyboardButton(
+        _get_text("adventure.inventory_eat_cancel"),
+        callback_data=f"invt_{user_id}_cancel",
+    )])
+    return InlineKeyboardMarkup(rows)
+
+
+async def adventure_inventory_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /adventure_inventory command - show player inventory."""
+    user = update.effective_user
+    if not user:
+        return
+
     # Уборка: сама команда игрока и ответ бота живут минуту.
     await schedule_self_delete(context, update.effective_message)
+
+    player = get_player(user.id)
     message = await update.effective_message.reply_text(
-        "\n".join(inventory_lines),
-        parse_mode=ParseMode.HTML
+        _render_inventory(player),
+        parse_mode=ParseMode.HTML,
+        reply_markup=_inventory_keyboard(user.id, player),
     )
     await schedule_self_delete(context, message)
+
+
+def _message_delete_args(update: Update) -> tuple[int, int] | None:
+    """(chat_id, message_id) сообщения с кнопками пикера, если оно есть."""
+    message = update.callback_query.message if update.callback_query else None
+    if message is None:
+        return None
+    return message.chat_id, message.message_id
+
+
+async def inventory_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Колбэки пикера поедания: invt_{owner}_{use|cancel} и invt_{owner}_eat_{hash}."""
+    query = update.callback_query
+    if query is None:
+        return
+    data = query.data or ""
+    parts = data.split("_")  # invt_{owner}_{use|cancel} | invt_{owner}_eat_{hash}
+    user = update.effective_user
+
+    if user is None or len(parts) < 3 or parts[0] != "invt":
+        await query.answer()
+        return
+    try:
+        owner_id = int(parts[1])
+    except ValueError:
+        await query.answer()
+        return
+    if user.id != owner_id:
+        await query.answer(_get_text("adventure.inventory_not_your"))
+        return
+    action = parts[2]
+
+    player = get_player(user.id)
+    message_args = _message_delete_args(update)
+
+    if action == "use":
+        edibles = _construct_edibles(player)
+        if message_args:
+            await redirect_self_delete(context, *message_args, EAT_SESSION_SECONDS)
+        if not edibles:
+            await query.answer(_get_text("adventure.inventory_eat_missing"))
+            await query.edit_message_text(
+                text=_render_inventory(player),
+                parse_mode=ParseMode.HTML,
+                reply_markup=None,
+            )
+            return
+        await query.edit_message_text(
+            text=_render_eat_panel(player),
+            parse_mode=ParseMode.HTML,
+            reply_markup=_eat_keyboard(user.id, edibles),
+        )
+        await query.answer()
+        return
+
+    if action == "cancel":
+        await query.edit_message_text(
+            text=_render_inventory(player),
+            parse_mode=ParseMode.HTML,
+            reply_markup=_inventory_keyboard(user.id, player),
+        )
+        if message_args:
+            await redirect_self_delete(context, *message_args, DEFAULT_DELETE_DELAY)
+        await query.answer()
+        return
+
+    if action == "eat" and len(parts) == 4:
+        result = eat_inventory_item(user.id, parts[3])
+        if result.get("event") == "battle":
+            await query.answer(_get_text("adventure.inventory_battle_busy"))
+            return
+        if result.get("event") != "eaten":
+            await query.answer(_get_text("adventure.inventory_eat_missing"))
+            return
+
+        player = get_player(user.id)
+        result_line = _get_text(
+            "adventure.inventory_eat_result",
+            item=result["item"],
+            healed=result["healed"],
+            current=result["current"],
+            max_hp=result["max_hp"],
+        )
+        edibles = _construct_edibles(player)
+        if edibles:
+            text = result_line + "\n\n" + _render_eat_panel(player)
+            reply_markup = _eat_keyboard(user.id, edibles)
+        else:
+            text = result_line + "\n\n" + _render_inventory(player)
+            reply_markup = _inventory_keyboard(user.id, player)
+        await query.edit_message_text(
+            text=text,
+            parse_mode=ParseMode.HTML,
+            reply_markup=reply_markup,
+        )
+        if message_args:
+            await redirect_self_delete(context, *message_args, EAT_SESSION_SECONDS)
+        await query.answer()
+        return
+
+    await query.answer()
 
 
 async def send_expedition_result(user_id: int, loc_id: str | None, username: str | None, context: ContextTypes.DEFAULT_TYPE, chat_id: int | None = None) -> None:
