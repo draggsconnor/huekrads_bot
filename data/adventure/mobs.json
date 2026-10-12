@@ -87,17 +87,17 @@
   },
   "loot_table": {
     "common": {
-      "items": ["herb", "stone", "wood", "leather"],
+      "items": ["herb", "stone", "wood", "leather", "mandarin", "provocation_apple", "soot_berry"],
       "gold": {"min": 5, "max": 20},
       "xp": {"min": 10, "max": 30}
     },
     "uncommon": {
-      "items": ["magic_crystal", "enchanted_ore", "rare_herb", "monster_part"],
+      "items": ["magic_crystal", "enchanted_ore", "rare_herb", "monster_part", "cursed_lemon", "grief_pear", "peach", "ancient_mango"],
       "gold": {"min": 20, "max": 50},
       "xp": {"min": 30, "max": 70}
     },
     "rare": {
-      "items": ["ancient_relic", "dragon_scale", "elemental_core", "cursed_gem"],
+      "items": ["ancient_relic", "dragon_scale", "elemental_core", "cursed_gem", "ancestors_pepper", "rotten_melon"],
       "gold": {"min": 50, "max": 150},
       "xp": {"min": 70, "max": 150}
     },
@@ -164,6 +164,15 @@
         "encounter_chance": 0.20,
         "tier": "uncommon",
         "battle": {"win_hits": 2, "dmg_per_hit": 35},
+        "loot": [
+          {
+            "item_id": "resin_apple",
+            "name": "🍎 Смоляное яблоко",
+            "quantity_min": 1,
+            "quantity_max": 1,
+            "chance": 0.20
+          }
+        ],
         "description": "Одичавший гоблин, покрытый смолой Хвойного Барона. Двигается медленно, но каждый удар оставляет липкий след.",
         "tactics": "Медленный, но может замедлить гнома смолой.",
         "special_ability": {

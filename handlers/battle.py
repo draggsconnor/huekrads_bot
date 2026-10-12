@@ -184,7 +184,7 @@ def build_battle_enemy(loc_id: str) -> dict[str, Any] | None:
             "win_hits": int(cfg.get("win_hits", defaults["win_hits"])),
             "dmg_per_hit": int(cfg.get("dmg_per_hit", defaults["dmg_per_hit"])),
             "base_reward": 0,
-            "loot": [],
+            "loot": pick.get("loot") or [],
             "pool_items": pool_items,
         }
 
@@ -357,10 +357,11 @@ def _apply_battle_victory(player: dict[str, Any], battle: dict[str, Any]) -> dic
 
     items: list[dict[str, Any]] = []
     if enemy.get("loot"):
+        # Спец-лут моба/босса (например, смоляное яблоко у слуги).
         for item in _roll_loot(enemy["loot"]):
             name = item.get("name") or _pool_item_name(item.get("item_id") or "")
             items.append({"name": name, "quantity": item.get("quantity", 1)})
-    elif enemy.get("pool_items") and random.random() < ITEM_DROP_CHANCE:
+    if enemy.get("pool_items") and random.random() < ITEM_DROP_CHANCE:
         item_id = random.choice(enemy["pool_items"])
         items.append({"name": _pool_item_name(item_id), "quantity": 1})
     if items:

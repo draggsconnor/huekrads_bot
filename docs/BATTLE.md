@@ -75,7 +75,8 @@ blocked = player_block  == enemy_attack    # 1/3 игомень закрыл г�
 |---|---|
 | XP | common 10 · uncommon 15 · rare 25 · босс `10 + base_reward` |
 | Лечение | +20 HP (сверх восстановленного после урона) |
-| Предмет | мобы: шанс **50%** + случайный id из `mobs.json → loot_table[tier].items` → имя из `global_pool.json → items`; боссы: свой `loot`-таблица по шансам |
+| Предмет | мобы: шанс **50%** + случайный id из `mobs.json → loot_table[tier].items` (в пул включены фрукты); специфичные мобы: свой `loot`-таблица по шансам (у смоляного слуги — 🍎 Смоляное яблоко, 20%) **плюс** пул тира; боссы: свой loot по шансам |
+| Описания | предметы с `description` в `global_pool.json` показываются в `/adventure_inventory` курсивом под предметом |
 | Статистика | `wins`, `total_fights` +1; XP уходит в порог уровня (`50 + N×50`, +20 max HP) |
 
 Итог боя пишется в `active_expedition.battle_log` (враг, раунды, XP, предмет) —

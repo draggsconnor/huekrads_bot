@@ -126,6 +126,44 @@ async def test_inventory_reply_schedules_self_delete(fake_context, tmp_path, mon
     assert entries == [(60, 100), (60, 101)]
 
 
+async def test_inventory_new_renders_fruit_descriptions(fake_context, tmp_path, monkeypatch):
+    """Описание фрукта из общего каталога показывается в инвентаре."""
+    import handlers.adventure as adventure
+
+    data_path = tmp_path / "player_data.json"
+    data_path.write_text(json.dumps({"1001": {
+        "hp": 200, "max_hp": 200, "lvl": 1,
+        "inventory": [
+            {"name": "🍎 Смоляное яблоко", "quantity": 1},
+            {"name": "🌿 Хвоя", "quantity": 1},
+            {"name": "🌿 Хвоя", "quantity": 1},
+            {"name": "🌿 Хвоя", "quantity": 1},
+        ],
+    }}, ensure_ascii=False), encoding="utf-8")
+    monkeypatch.setattr(adventure, "PLAYER_DATA_PATH", str(data_path))
+
+    pool_path = tmp_path / "global_pool.json"
+    pool_path.write_text(json.dumps({"items": {
+        "resin_apple": {"name": "🍎 Смоляное яблоко", "description": "Выросло на смоле Барона. Липкое."},
+    }}, ensure_ascii=False), encoding="utf-8")
+    monkeypatch.setattr(adventure, "GLOBAL_POOL_PATH", str(pool_path))
+
+    reply = AsyncMock(return_value=SimpleNamespace(chat_id=-42, message_id=100))
+    update = SimpleNamespace(
+        effective_user=SimpleNamespace(id=1001),
+        effective_message=SimpleNamespace(chat_id=-42, message_id=103, reply_text=reply),
+    )
+
+    await adventure.adventure_inventory_command(update, fake_context)
+
+    text = reply.await_args.args[0]
+    assert "🍎 Смоляное яблоко: 1 шт." in text
+    assert "🌿 Хвоя: 3 шт." in text
+    assert "Выросло на смоле Барона. Липкое." in text
+    # Хвоя — ресурс локации, описаний в каталоге нет: только в одну строку
+    assert text.count("Хвоя") == 1
+
+
 async def test_help_reply_schedules_self_delete(fake_context):
     import bot
 

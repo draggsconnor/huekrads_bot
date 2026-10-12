@@ -320,6 +320,7 @@ no_active_expedition: "❌ У вас нет активной экспедици�
 adventure_inventory_title: "🎒 <b>Инвентарь экспедиций</b>"
 adventure_inventory_no_items: "Пусто..."
 adventure_inventory_item: "• {name}: {count} шт."
+inventory_item_desc: "      <i>{desc}</i>"
 
 # Stats
 adventure_stats_title: "📊 <b>Статистика экспедиций</b>"

@@ -911,9 +911,18 @@ async def adventure_inventory_command(update: Update, context: ContextTypes.DEFA
         for item in inventory:
             item_name = item.get("name", "Unknown")
             inventory_counts[item_name] = inventory_counts.get(item_name, 0) + 1
-        
+
+        # Описания предметов из общего каталога (фрукты и прочие item_id).
+        descriptions = {}
+        for entry in (load_global_pool().get("items") or {}).values():
+            if entry.get("description") and entry.get("name"):
+                descriptions[entry["name"]] = entry["description"]
+
         for item_name, count in sorted(inventory_counts.items()):
             inventory_lines.append(_get_text("adventure.adventure_inventory_item", name=item_name, count=count))
+            desc = descriptions.get(item_name)
+            if desc:
+                inventory_lines.append(_get_text("adventure.inventory_item_desc", desc=desc))
     else:
         inventory_lines.append(_get_text("adventure.adventure_inventory_no_items"))
     

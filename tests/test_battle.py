@@ -544,6 +544,52 @@ class TestAbortBattle:
         assert battle.abort_battle(123) is False
 
 
+class TestApplyBattleVictoryLoot:
+    def _prepare(self, tmp_path, monkeypatch):
+        data_path = tmp_path / "player_data.json"
+        _setup_paths(tmp_path, monkeypatch)
+        _write_player(data_path, {"hp": 200, "max_hp": 200, "xp": 0, "inventory": []})
+        return data_path
+
+    def _player(self, data_path):
+        return _read_player(data_path)
+
+    def test_special_loot_and_pool_roll_both_apply(self, tmp_path, monkeypatch):
+        # Слуга: свой лут (яблоко) дропается И пул тира — независимо.
+        monkeypatch.setattr(battle, "random", FakeRandom(0.0))
+        data_path = self._prepare(tmp_path, monkeypatch)
+        player = self._player(data_path)
+
+        state = _battle(enemy={
+            "name": "Слуга", "tier": "uncommon", "win_hits": 2, "dmg_per_hit": 35,
+            "base_reward": 0,
+            "loot": [{"item_id": "resin_apple", "name": "🍎 Смоляное яблоко",
+                      "quantity_min": 1, "quantity_max": 1, "chance": 1.0}],
+            "pool_items": ["herb"],
+        })
+        battle._apply_battle_victory(player, state)
+
+        names = [i["name"] for i in player["inventory"]]
+        assert "🍎 Смоляное яблоко" in names
+        assert "🌿 Трава" in names
+        assert player["xp"] == 15  # uncommon
+        assert player["wins"] == 1
+
+    def test_regular_mob_pool_only(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(battle, "random", FakeRandom(0.99))  # 50% дроп не сработал
+        data_path = self._prepare(tmp_path, monkeypatch)
+        player = self._player(data_path)
+
+        state = _battle(enemy={
+            "name": "Крыс", "tier": "common", "win_hits": 1, "dmg_per_hit": 25,
+            "base_reward": 0, "loot": [], "pool_items": ["herb"],
+        })
+        battle._apply_battle_victory(player, state)
+
+        assert player["inventory"] == []
+        assert player["xp"] == 10  # common
+
+
 class TestBattleWatcher:
     async def test_advances_expired_phase(self, tmp_path, monkeypatch, fake_context):
         monkeypatch.setattr(battle, "random", FakeRandom(0.0))
