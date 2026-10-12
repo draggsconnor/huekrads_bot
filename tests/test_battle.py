@@ -256,6 +256,43 @@ class TestBuildBattleEnemy:
         assert enemy["win_hits"] == 2
         assert enemy["dmg_per_hit"] == 40
 
+    def test_abandoned_mine_roster(self, tmp_path, monkeypatch):
+        """Шахта: специфичные мобы из реальных данных, редкости и лор."""
+        import os
+
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        data_dir = os.path.join(root, "data", "adventure")
+        monkeypatch.setattr(adv, "PLAYER_DATA_PATH", os.path.join(tmp_path, "players.json"))
+        monkeypatch.setattr(adv, "LOCATIONS_PATH", os.path.join(data_dir, "locations.json"))
+        monkeypatch.setattr(adv, "MOBS_PATH", os.path.join(data_dir, "mobs.json"))
+        monkeypatch.setattr(adv, "GLOBAL_POOL_PATH", os.path.join(data_dir, "global_pool.json"))
+        monkeypatch.setattr(battle, "random", FakeRandom(seq=[0.9, 0.9, 0.0]))
+        # 0.9 ×2: мимо тролля (35%) и шамана (25%); 0.0: первый из весового пула мобов
+
+        enemy = battle.build_battle_enemy("abandoned_mine")
+        assert enemy["id"] == "huekrad_ghost"
+        assert enemy["name"] == "👻 Призрак хуекрада"
+        assert enemy["tier"] == "common"          # 1 попадание / 25 урона
+        assert enemy["win_hits"] == 1
+        assert enemy["dmg_per_hit"] == 25
+        assert enemy["desc"]                      # лорное описание подтянулось
+
+        # Ростер целиком и разбиение по редкостям проверяет test_mine_mobs_described_in_data.
+
+    def test_mine_mobs_described_in_data(self):
+        """Ростер шахты: 12 мобов, по 4 на редкость, у всех лорные описания."""
+        with open("data/adventure/mobs.json", encoding="utf-8") as f:
+            mobs = json.load(f)
+        roster = mobs["specific_mobs"]["abandoned_mine"]
+        assert len(roster) == 12
+        from collections import Counter
+        counts = Counter(m["tier"] for m in roster)
+        assert counts == {"common": 4, "uncommon": 4, "rare": 4}
+        assert all(m.get("description") for m in roster)
+        # Имена из mob_types больше не дублируют шахту — единственный источник.
+        for tier in ("common", "uncommon", "rare"):
+            assert "abandoned_mine" not in mobs["mob_types"][tier]["names"]
+
 
 class TestRollLoot:
     def test_roll_loot_respects_chances(self):
