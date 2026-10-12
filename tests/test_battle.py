@@ -217,6 +217,33 @@ class TestBuildBattleEnemy:
         assert enemy["dmg_per_hit"] == 25
         assert enemy["pool_items"] == ["herb", "stone"]
 
+    def test_pine_barren_minion_resolves_yaml_text(self, tmp_path, monkeypatch):
+        mobs = json.loads(json.dumps(MOBS))
+        mobs["specific_mobs"]["test_loc"] = [
+            *mobs["specific_mobs"]["test_loc"],
+            {
+                "id": "pine_barren_minion",
+                "name": "Inline Слуга",
+                "encounter_chance": 1.0,
+                "tier": "uncommon",
+                "battle": {"win_hits": 2, "dmg_per_hit": 35},
+                "description": "inline desc",
+            },
+        ]
+        _setup_paths(tmp_path, monkeypatch, mobs=mobs)
+        monkeypatch.setattr(battle, "random", FakeRandom(0.85))
+        # Веса: куст 1.0 + слуга 1.0 -> 0.85 * 2 = 1.7 > 1.0, попадаем в слугу
+
+        enemy = battle.build_battle_enemy("test_loc")
+        assert enemy["id"] == "pine_barren_minion"
+        # Имя и описание берутся из adventure.yaml, а не из инлайн-фолбэка
+        assert enemy["name"] == "🌲Смоляной слуга"
+        assert "Барона" in enemy["desc"]
+        assert "<b>Тактика:</b>" in enemy["desc"]
+        assert enemy["tier"] == "uncommon"
+        assert enemy["win_hits"] == 2
+        assert enemy["dmg_per_hit"] == 35
+
     def test_generated_mob_by_rarity(self, tmp_path, monkeypatch):
         mobs = json.loads(json.dumps(MOBS))
         mobs["specific_mobs"]["test_loc"] = []
