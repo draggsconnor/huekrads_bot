@@ -139,9 +139,6 @@ def render_huecrab_card(player: dict[str, Any]) -> str:
         level=level, xp=xp, to_next=pet_xp_for_next_level(level),
     ))
     lines.extend(perk_lines(pet.get("perks") or {}))
-    if not pet.get("renamed"):
-        lines.append("")
-        lines.append(get_text("pets.rename_hint"))
     return "\n".join(lines)
 
 
@@ -189,6 +186,7 @@ async def adventure_huecrab_command(update: Update, context: ContextTypes.DEFAUL
     message = await update.effective_message.reply_text(
         render_huecrab_card(player),
         parse_mode=ParseMode.HTML,
+        reply_markup=_huecrab_card_keyboard(user.id, player),
     )
     await schedule_self_delete(context, message)
 
@@ -231,6 +229,19 @@ def move_to_saray(user_id: int, uid: str) -> dict[str, Any]:
         player["pet"] = chosen
         save_player_data(data)
         return {"event": "swapped", "new": chosen.get("name"), "old": pet.get("name")}
+
+
+def _huecrab_card_keyboard(user_id: int, player: dict[str, Any]):
+    """Карточка питомца: кнопка имени у неназванного краба."""
+    pet = player.get("pet")
+    if isinstance(pet, dict) and pet.get("name") and not pet.get("renamed"):
+        return InlineKeyboardMarkup([[
+            InlineKeyboardButton(
+                get_text("pets.card_rename_button"),
+                callback_data=f"hcrab_{user_id}_rename",
+            )
+        ]])
+    return None
 
 
 def _pet_brief(pet: dict[str, Any]) -> str:
@@ -390,6 +401,84 @@ async def saray_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
 
     await query.answer()
+
+
+PENDING_RENAME_KEY = "pet_rename_pending"
+
+
+async def huecrab_card_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Кнопка «ДАТЬ ИМЯ» в карточке — тумблер ожидания имени текстом."""
+    query = update.callback_query
+    if query is None:
+        return
+
+    parts = (query.data or "").split("_")  # hcrab_{owner}_rename
+    user = update.effective_user
+    if user is None or len(parts) != 3 or parts[0] != "hcrab":
+        await query.answer()
+        return
+    try:
+        owner_id = int(parts[1])
+    except ValueError:
+        await query.answer()
+        return
+    if user.id != owner_id:
+        await query.answer(get_text("pets.saray_not_your"))
+        return
+
+    player = get_player(user.id)
+    pet = player.get("pet") if isinstance(player, dict) else None
+    if not isinstance(pet, dict) or not pet.get("name") or pet.get("renamed"):
+        await query.answer(get_text("pets.name_need_pet"))
+        return
+
+    if context.user_data.get(PENDING_RENAME_KEY):
+        context.user_data.pop(PENDING_RENAME_KEY, None)
+        await query.answer(get_text("pets.rename_cancel_toast"))
+        return
+
+    context.user_data[PENDING_RENAME_KEY] = query.message.chat_id if query.message else user.id
+    await query.answer(get_text("pets.rename_pending_toast"))
+
+
+async def pet_name_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Если бот ждёт имя питомца от пользователя — следующий текст это имя."""
+    from html import escape
+
+    message = update.effective_message
+    user = update.effective_user
+    if not message or not message.text:
+        return
+    if not user:
+        return
+
+    pending = (context.user_data or {}).get(PENDING_RENAME_KEY)
+    if not pending or pending != message.chat_id:
+        return  # обычное сообщение мимо режима именования
+
+    context.user_data.pop(PENDING_RENAME_KEY, None)
+    result = name_pet(user.id, message.text)
+
+    # Текст-ввод имени — мусор в чате: удаляем (нужны права, иначе останется).
+    try:
+        await context.bot.delete_message(
+            chat_id=message.chat_id, message_id=message.message_id,
+        )
+    except Exception:
+        pass
+
+    if result.get("event") == "named":
+        await message.reply_text(
+            get_text("pets.name_set", name=escape(result["name"])),
+            parse_mode=ParseMode.HTML,
+        )
+    elif result.get("event") == "already_named":
+        await message.reply_text(
+            get_text("pets.name_already", name=escape(result.get("name", ""))),
+            parse_mode=ParseMode.HTML,
+        )
+    elif result.get("event") == "empty_name":
+        await message.reply_text(get_text("pets.name_usage"))
 
 
 async def adventure_saray_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

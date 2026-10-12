@@ -331,13 +331,110 @@ class TestHuecrabCard:
         assert "Питомца пока нет" in text
         assert "ВЫЛУПИТЬ" in text
 
-    def test_card_rename_hint_is_html_safe(self, tmp_path, monkeypatch):
-        """Строка с <имя> больше не кладёт HTML-парсинг Telegram (регресс)."""
+    def test_card_rename_button_for_unnamed_crab(self):
+        # Без имени → кнопка naming с адресом владельца.
         player = {"pet": {"id": "piebald_crab", "name": "🦀 Пёстрый хуекраб",
                           "perks": {}, "level": 1, "xp": 0}}
-        text = pets.render_huecrab_card(player)
-        assert "&lt;имя&gt;" in text
-        assert "<имя>" not in text
+        markup = pets._huecrab_card_keyboard(7, player)
+        button = markup.inline_keyboard[0][0]
+        assert "ДАТЬ ИМЯ" in button.text
+        assert button.callback_data == "hcrab_7_rename"
+
+    def test_no_rename_button_for_named_crab(self):
+        player = {"pet": {"id": "piebald_crab", "name": "🦀 Байт",
+                          "perks": {}, "renamed": True, "level": 1, "xp": 0}}
+        assert pets._huecrab_card_keyboard(7, player) is None
+
+    async def test_rename_toggle_pends_and_cancels(self, tmp_path, monkeypatch, fake_context):
+        data_path = tmp_path / "player_data.json"
+        with open(data_path, "w", encoding="utf-8") as f:
+            json.dump({"123": {
+                "hp": 200, "max_hp": 200, "lvl": 1,
+                "pet": {"id": "piebald_crab", "name": "🦀 Пёстрый хуекраб",
+                        "perks": {}, "level": 1, "xp": 0},
+            }}, f, ensure_ascii=False)
+        monkeypatch.setattr(adv, "PLAYER_DATA_PATH", str(data_path))
+
+        query = SimpleNamespace(
+            data="hcrab_123_rename", answer=AsyncMock(),
+            message=SimpleNamespace(chat_id=-42, message_id=400),
+        )
+        update = SimpleNamespace(callback_query=query, effective_user=SimpleNamespace(id=123))
+
+        await pets.huecrab_card_callback(update, fake_context)
+        assert fake_context.user_data[pets.PENDING_RENAME_KEY] == -42
+        query.answer.assert_awaited()  # тост с инструкцией
+
+        # Повторное нажатие — отмена.
+        await pets.huecrab_card_callback(update, fake_context)
+        assert not fake_context.user_data.get(pets.PENDING_RENAME_KEY)
+        query.answer.assert_awaited_with("⌨️ Ожидание имени отменено.")
+
+    async def test_text_names_pet_and_cleans_up(self, tmp_path, monkeypatch, fake_context):
+        data_path = tmp_path / "player_data.json"
+        with open(data_path, "w", encoding="utf-8") as f:
+            json.dump({"123": {
+                "hp": 200, "max_hp": 200, "lvl": 1,
+                "pet": {"id": "piebald_crab", "name": "🦀 Пёстрый хуекраб",
+                        "perks": {}, "level": 1, "xp": 0},
+            }}, f, ensure_ascii=False)
+        monkeypatch.setattr(adv, "PLAYER_DATA_PATH", str(data_path))
+
+        fake_context.user_data[pets.PENDING_RENAME_KEY] = -42
+        reply = AsyncMock(return_value=SimpleNamespace(chat_id=-42, message_id=401))
+        message = SimpleNamespace(
+            text="Байт", chat_id=-42, message_id=402, reply_text=reply,
+        )
+        await pets.pet_name_text_handler(
+            SimpleNamespace(
+                effective_user=SimpleNamespace(id=123),
+                effective_message=message,
+            ),
+            fake_context,
+        )
+
+        assert "Байт" in reply.await_args.args[0]
+        fake_context.bot.delete_message.assert_awaited_once_with(chat_id=-42, message_id=402)
+        stored = json.load(open(data_path, encoding="utf-8"))["123"]
+        assert stored["pet"]["name"] == "Байт"
+        assert stored["pet"]["renamed"] is True
+
+    async def test_text_passes_through_without_pending(self, fake_context):
+        reply = AsyncMock()
+        message = SimpleNamespace(text="обычный текст", chat_id=-42, message_id=5, reply_text=reply)
+        await pets.pet_name_text_handler(
+            SimpleNamespace(
+                effective_user=SimpleNamespace(id=123),
+                effective_message=message,
+            ),
+            fake_context,
+        )
+        reply.assert_not_awaited()
+        fake_context.bot.delete_message.assert_not_awaited()
+
+    async def test_text_ignored_in_other_chat(self, tmp_path, monkeypatch, fake_context):
+        # Флаг ожидания установлен для -42, текст пришёл в другой чат — мимо.
+        data_path = tmp_path / "player_data.json"
+        with open(data_path, "w", encoding="utf-8") as f:
+            json.dump({"123": {
+                "hp": 200, "max_hp": 200, "lvl": 1,
+                "pet": {"id": "piebald_crab", "name": "🦀 Пёстрый хуекраб",
+                        "perks": {}, "level": 1, "xp": 0},
+            }}, f, ensure_ascii=False)
+        monkeypatch.setattr(adv, "PLAYER_DATA_PATH", str(data_path))
+
+        fake_context.user_data[pets.PENDING_RENAME_KEY] = -42
+        reply = AsyncMock()
+        message = SimpleNamespace(text="Байт", chat_id=777, message_id=6, reply_text=reply)
+        await pets.pet_name_text_handler(
+            SimpleNamespace(
+                effective_user=SimpleNamespace(id=123),
+                effective_message=message,
+            ),
+            fake_context,
+        )
+        reply.assert_not_awaited()
+        assert fake_context.user_data[pets.PENDING_RENAME_KEY] == -42  # флаг жив
 
     async def test_command_renders_card(self, tmp_path, monkeypatch, fake_context):
         _setup(tmp_path, monkeypatch, {

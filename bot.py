@@ -6,6 +6,8 @@ from telegram.ext import (
     CallbackQueryHandler,
     CommandHandler,
     ContextTypes,
+    MessageHandler,
+    filters,
 )
 
 from config import BOT_TOKEN
@@ -23,6 +25,8 @@ from handlers.pets import (
     adventure_huecrab_command,
     adventure_huecrab_name_command,
     adventure_saray_command,
+    huecrab_card_callback,
+    pet_name_text_handler,
     saray_callback,
 )
 from handlers.utils import error_handler, schedule_self_delete
@@ -45,6 +49,7 @@ BOT_COMMANDS = [
     BotCommand("adventure_stats", get_text("menu.commands.adventure_stats")),
     BotCommand("adventure_inventory", get_text("menu.commands.adventure_inventory")),
     BotCommand("adventure_huecrab", get_text("menu.commands.huecrab")),
+    BotCommand("adventure_saray", get_text("menu.commands.saray")),
 ]
 
 
@@ -128,6 +133,18 @@ def main() -> None:
         CallbackQueryHandler(
             saray_callback,
             pattern=r"^saray_",
+        )
+    )
+    application.add_handler(
+        CallbackQueryHandler(
+            huecrab_card_callback,
+            pattern=r"^hcrab_",
+        )
+    )
+    application.add_handler(
+        MessageHandler(
+            filters.TEXT & ~filters.COMMAND,
+            pet_name_text_handler,
         )
     )
     application.add_error_handler(error_handler)

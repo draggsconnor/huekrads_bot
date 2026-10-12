@@ -3,6 +3,7 @@ commands:
   adventure_stats: "Статистика экспедиции"
   adventure_inventory: "Инвентарь экспедиции"
   huecrab: "Хуекраб"
+  saray: "Сарай хуекрабов"
   start: "Запустить бота"
   help: "Справка"
 
@@ -11,4 +12,7 @@ help_text: |
 
   /adventure — выбрать локацию и отправить гнома
   /adventure_stats — статистика
-  /adventure_inventory — инвентарь
+  /adventure_inventory — инвентарь (фрукты здесь можно съесть)
+  /adventure_huecrab — карточка хуекраба
+  /adventure_saray — сарай хуекрабов (кто где живёт, смена напарника)
+  /adventure_huecrab_name — назвать хуекраба (имя можно давать один раз)
