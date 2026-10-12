@@ -173,8 +173,8 @@ def _required_level(loc: dict[str, Any]) -> int:
 
 
 def _xp_for_next_level(level: int) -> int:
-    """XP needed to advance from the given level (lvl 1 -> 2 costs 100)."""
-    return 50 + level * 50
+    """XP до левелапа: ровно 100 за любой уровень."""
+    return 100
 
 
 def _apply_level_ups(player: dict[str, Any]) -> bool:
@@ -893,6 +893,11 @@ async def adventure_stats_command(update: Update, context: ContextTypes.DEFAULT_
         _get_text("adventure.adventure_stats_hp", current=current_hp, max=max_hp),
         _get_text("adventure.adventure_stats_gold", gold=gold),
         _get_text("adventure.adventure_stats_xp", xp=xp),
+        _get_text(
+            "adventure.adventure_stats_xp_left",
+            left=max(0, _xp_for_next_level(level) - xp),
+            level=level + 1,
+        ),
         _get_text("adventure.adventure_stats_expeditions", count=total_expeditions),
         _get_text("adventure.adventure_stats_expeditions_success", success=wins),
     ]

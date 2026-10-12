@@ -226,6 +226,28 @@ class TestRollResources:
         assert adv._roll_resources(loc) == [{"name": "🌿 Хвоя", "quantity": 1}]
 
 
+class TestAdventureStatsXpLeft:
+    async def test_stats_show_xp_left(self, tmp_path, monkeypatch, fake_context):
+        data_path = tmp_path / "player_data.json"
+        with open(data_path, "w", encoding="utf-8") as f:
+            json.dump({"1001": {"hp": 200, "max_hp": 200, "lvl": 1, "xp": 40}}, f, ensure_ascii=False)
+        monkeypatch.setattr(adv, "PLAYER_DATA_PATH", str(data_path))
+
+        reply = AsyncMock(return_value=SimpleNamespace(chat_id=-42, message_id=500))
+        await adv.adventure_stats_command(
+            SimpleNamespace(
+                effective_user=SimpleNamespace(id=1001, username="tester", first_name="Tester"),
+                effective_message=SimpleNamespace(chat_id=-42, message_id=501, reply_text=reply),
+            ),
+            fake_context,
+        )
+
+        text = reply.await_args.args[0]
+        assert "⭐ Опыт: 40" in text
+        # Порог левелапа — фиксированные 100 XP: до ур. 2 осталось 60.
+        assert "⬆️ До левелапа (ур. 2): 60 XP" in text
+
+
 class TestLeadingEmoji:
     def test_does_not_duplicate_first_letter(self):
         # было: '🌲Охуенно тёмный лес'[:2] -> '🌲О' + 'Охуенно…' -> 'ООхуенно'
