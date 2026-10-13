@@ -735,7 +735,7 @@ def _forge_category_text(player: dict[str, Any], slot: str) -> str:
     ])
 
 
-def _forge_category_keyboard(player: dict[str, Any], slot: str) -> InlineKeyboardMarkup:
+def _forge_category_keyboard(player: dict[str, Any], slot: str, user_id: int) -> InlineKeyboardMarkup:
     """Кнопки категории: ковка по одному рецепту + назад."""
     rows: list[list[InlineKeyboardButton]] = []
     glossary = _load_gear_catalog()
@@ -743,7 +743,7 @@ def _forge_category_keyboard(player: dict[str, Any], slot: str) -> InlineKeyboar
         entry = glossary.get(recipe.get("result")) or {}
         rows.append([InlineKeyboardButton(
             entry.get("name", recipe.get("id", "?")),
-            callback_data=f"{FORGE_CRAFT_CALLBACK}{slot}_{recipe.get('id')}",
+            callback_data=f"{FORGE_CRAFT_CALLBACK}{user_id}_{slot}_{recipe.get('id')}",
         )])
     rows.append([
         InlineKeyboardButton(
@@ -771,7 +771,7 @@ async def _render_forge_category(query, user_id: int, slot: str) -> None:
     player = get_player(user_id)
     await query.edit_message_text(
         _forge_category_text(player, slot),
-        reply_markup=_forge_category_keyboard(player, slot),
+        reply_markup=_forge_category_keyboard(player, slot, user_id),
         parse_mode=ParseMode.HTML,
     )
 
@@ -794,8 +794,11 @@ def _equipment_text(player: dict[str, Any], username: str) -> str:
     ])
 
 
-def _equipment_keyboard(player: dict[str, Any]) -> InlineKeyboardMarkup:
-    """Кнопки снаряжения: снять надетое, надеть из инвентаря, назад."""
+def _equipment_keyboard(player: dict[str, Any], user_id: int) -> InlineKeyboardMarkup:
+    """Кнопки снаряжения: снять надетое, надеть из инвентаря, назад.
+
+    Все кнопки персональные (owner в callback_data) — чужие клики грустят.
+    """
     rows: list[list[InlineKeyboardButton]] = []
     equipped = _equipment_with_names(player)
     for slot in FORGE_CATEGORIES:
@@ -803,7 +806,7 @@ def _equipment_keyboard(player: dict[str, Any]) -> InlineKeyboardMarkup:
         if piece:
             rows.append([InlineKeyboardButton(
                 _get_text("adventure.equipment_unequip_button", name=piece.get("name", "?")),
-                callback_data=f"{FORGE_OFF_CALLBACK}{slot}",
+                callback_data=f"{FORGE_OFF_CALLBACK}{user_id}_{slot}",
             )])
 
     counts: dict[str, int] = {}
@@ -819,7 +822,7 @@ def _equipment_keyboard(player: dict[str, Any]) -> InlineKeyboardMarkup:
                 "adventure.equipment_equip_button",
                 name=entry.get("name", gear_id), count=count,
             ),
-            callback_data=f"{FORGE_ON_CALLBACK}{gear_id}",
+            callback_data=f"{FORGE_ON_CALLBACK}{user_id}_{gear_id}",
         )])
 
     rows.append([InlineKeyboardButton(
@@ -833,7 +836,7 @@ async def _render_equipment(query, user_id: int, username: str) -> None:
     player = get_player(user_id)
     await query.edit_message_text(
         _equipment_text(player, username),
-        reply_markup=_equipment_keyboard(player),
+        reply_markup=_equipment_keyboard(player, user_id),
         parse_mode=ParseMode.HTML,
     )
 
@@ -847,7 +850,7 @@ async def adventure_equipment_command(update: Update, context: ContextTypes.DEFA
     username = user.username or user.first_name or _get_text("common.user.default_title")
     message = await update.effective_message.reply_text(
         _equipment_text(player, username),
-        reply_markup=_equipment_keyboard(player),
+        reply_markup=_equipment_keyboard(player, user.id),
         parse_mode=ParseMode.HTML,
     )
     # Экран снаряжения — рабочее окно (как кузня): живёт пять минут.
@@ -1047,24 +1050,31 @@ async def adventure_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
 
     if data.startswith(FORGE_RECIPES_CALLBACK):
-        slot = data[len(FORGE_RECIPES_CALLBACK):]
-        if slot not in FORGE_CATEGORIES:
-            await query.answer(_get_text("adventure.forge_slot_unknown"))
+        owner_raw, _, slot = data[len(FORGE_RECIPES_CALLBACK):].partition("_")
+        if not owner_raw.isdigit() or slot not in FORGE_CATEGORIES:
+            await query.answer()
+            return
+        if user.id != int(owner_raw):
+            await query.answer(_get_text("adventure.forge_not_your"))
             return
         player = get_player(user.id)
         await query.edit_message_text(
             _forge_category_text(player, slot),
-            reply_markup=_forge_category_keyboard(player, slot),
+            reply_markup=_forge_category_keyboard(player, slot, user.id),
             parse_mode=ParseMode.HTML,
         )
         return
 
     if data.startswith(FORGE_CRAFT_CALLBACK):
-        # adv_craftr_{slot}_{recipe_id} — крафт и возврат в ту же категорию.
-        slot, _, recipe_id = data[len(FORGE_CRAFT_CALLBACK):].partition("_")
+        # adv_craftr_{owner}_{slot}_{recipe_id} — крафт и возврат в ту же категорию.
+        owner_raw, _, rest = data[len(FORGE_CRAFT_CALLBACK):].partition("_")
+        slot, _, recipe_id = rest.partition("_")
         recipe = next((r for r in load_recipes() if r.get("id") == recipe_id), None)
-        if slot not in FORGE_CATEGORIES or not recipe:
+        if not owner_raw.isdigit() or slot not in FORGE_CATEGORIES or not recipe:
             await query.answer(_get_text("adventure.forge_craft_unknown"))
+            return
+        if user.id != int(owner_raw):
+            await query.answer(_get_text("adventure.forge_not_your"))
             return
         player = get_player(user.id)
         missing = _check_materials(player, recipe.get("materials") or [])
@@ -1080,8 +1090,14 @@ async def adventure_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
 
     if data.startswith(FORGE_ON_CALLBACK):
-        gear_id = data[len(FORGE_ON_CALLBACK):]
+        owner_raw, _, gear_id = data[len(FORGE_ON_CALLBACK):].partition("_")
         catalog = _load_gear_catalog()
+        if not owner_raw.isdigit():
+            await query.answer()
+            return
+        if user.id != int(owner_raw):
+            await query.answer(_get_text("adventure.forge_not_your"))
+            return
         entry = catalog.get(gear_id)
         if not entry:
             await query.answer(_get_text("adventure.forge_craft_unknown"))
@@ -1108,9 +1124,12 @@ async def adventure_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
 
     if data.startswith(FORGE_OFF_CALLBACK):
-        slot = data[len(FORGE_OFF_CALLBACK):]
-        if slot not in FORGE_CATEGORIES:
+        owner_raw, _, slot = data[len(FORGE_OFF_CALLBACK):].partition("_")
+        if not owner_raw.isdigit() or slot not in FORGE_CATEGORIES:
             await query.answer()
+            return
+        if user.id != int(owner_raw):
+            await query.answer(_get_text("adventure.forge_not_your"))
             return
         player = get_player(user.id)
         equipment = dict(player.get("equipment") or {})
