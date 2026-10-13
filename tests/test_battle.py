@@ -1016,7 +1016,7 @@ class TestPetPerks:
 
         # Одно сообщение боя: спутник и подсказка Соглядата вместе с обстановкой.
         text = battle._battle_message_text(state)
-        assert "ныряет гномом в бой" in text
+        assert "вместе с гномом" in text
         assert "держит блок" in text
 
 
