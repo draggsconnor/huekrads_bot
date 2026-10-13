@@ -49,10 +49,15 @@ victory_title: "🏆 <b>{username}</b> — ПОБЕДА!"
 victory_heal: "❤️‍🩹 Восстановлено после боя: +{hp} HP"
 reward_xp: "⭐ Опыт: +{xp}"
 reward_item: "🎒 Добыча: {item} x{count}"
+reward_pet_xp: "🦀 {pet} в деле: +{xp} XP напарнику"
+berserk_drop_line: "🦀 {pet} клацает клешнями столь грозно, что дроп щедрее обычного."
+scavenger_save_line: "🦀 {pet} добегает вперёд и докидывает свой бросок — без него руки были бы пустыми."
 
 # Defeat report
 defeat_title: "💀 <b>{username}</b> — ГНОМ ПОВЕРЖЕН!"
 defeat_loot: "🎒 Обронил по дороге: {item}"
+defeat_pet_xp: "🦀 {pet} тащит побитого гнома в лагерь: +{xp} XP напарнику"
+greedy_save_line: "🦀 Не победа, но выручка: {pet} собрал то, что успел."
 defeat_end: "🏃 Экспедиция прервана досрочно, без опыта. Гном еле дополз домой (1 HP)."
 
 # Общий блок итогов для обоих отчётов

@@ -366,7 +366,11 @@ def _apply_battle_victory(player: dict[str, Any], battle: dict[str, Any]) -> dic
     player["hp"] = min(max_hp, hp_after + healed)
 
     items: list[dict[str, Any]] = []
-    pet_perks = ((battle.get("pet") or {}).get("perks") or {})
+    pet = (battle.get("pet") or {})
+    pet_perks = (pet.get("perks") or {})
+    # Флаги участия краба — для строк заслуги в отчёте о победе.
+    pet_berserk_drop = False
+    pet_pool_save = False
     # Кровавый/Королевский хуекраб: победный дроп становится добрее.
     drop_chance = pet_perks.get("berserk") or ITEM_DROP_CHANCE
     if enemy.get("loot"):
@@ -377,11 +381,13 @@ def _apply_battle_victory(player: dict[str, Any], battle: dict[str, Any]) -> dic
     if enemy.get("pool_items") and random.random() < drop_chance:
         item_id = random.choice(enemy["pool_items"])
         items.append({"name": _pool_item_name(item_id), "quantity": 1})
+        pet_berserk_drop = bool(pet_perks.get("berserk"))
     # Пёстрый/Королевский хуекраб: если победный дроп мимо — краб докидывает.
     scavenger = pet_perks.get("scavenger")
     if scavenger and enemy.get("pool_items") and not items and random.random() < scavenger:
         item_id = random.choice(enemy["pool_items"])
         items.append({"name": _pool_item_name(item_id), "quantity": 1})
+        pet_pool_save = True
     if items:
         player["inventory"] = list(player.get("inventory", [])) + items
 
@@ -396,6 +402,9 @@ def _apply_battle_victory(player: dict[str, Any], battle: dict[str, Any]) -> dic
         "leveled_up": leveled_up,
         "level": player.get("lvl", 1),
         "max_hp": player.get("max_hp", 200),
+        "pet_name": pet.get("name"),
+        "pet_berserk_drop": pet_berserk_drop,
+        "pet_pool_save": pet_pool_save,
     }
     return rewards
 
@@ -407,16 +416,24 @@ def _apply_battle_defeat(player: dict[str, Any], battle: dict[str, Any]) -> dict
 
     items: list[dict[str, Any]] = []
     # Хуекраб-Жадина/Королевский: при поражении колючеусый тариф выше базового.
-    pet_perks = ((battle.get("pet") or {}).get("perks") or {})
+    pet = (battle.get("pet") or {})
+    pet_perks = (pet.get("perks") or {})
+    pet_greedy_save = False
     loot_chance = pet_perks.get("greedy") or DEFEAT_LOOT_CHANCE
     loc = load_locations().get(battle.get("location_id")) or {}
     resources = loc.get("resources") or []
     if resources and random.random() < loot_chance:
         resource = random.choice(resources)
         items.append({"name": resource.get("name", resource.get("id", "?")), "quantity": 1})
+        pet_greedy_save = bool(pet_perks.get("greedy"))
     if items:
         player["inventory"] = list(player.get("inventory", [])) + items
-    return {"items": items}
+    return {
+        "items": items,
+        "pet_name": pet.get("name"),
+        "pet_greedy_save": pet_greedy_save,
+        "pet_xp": PET_XP_ON_DEFEAT,
+    }
 
 
 def _settle_battle(player: dict[str, Any], battle: dict[str, Any], outcome: str) -> dict[str, Any]:
@@ -817,6 +834,15 @@ def _victory_report(battle: dict[str, Any], rewards: dict[str, Any]) -> str:
     lines.append(get_text("battle.reward_xp", xp=rewards.get("xp", 0)))
     for item in rewards.get("items") or []:
         lines.append(get_text("battle.reward_item", item=item.get("name"), count=item.get("quantity", 1)))
+    if rewards.get("pet_name"):
+        # Краб в отчёте — участник, а не мебель: XP напарника и заслуги перков.
+        lines.append(get_text(
+            "battle.reward_pet_xp", pet=rewards["pet_name"], xp=rewards.get("xp", 0),
+        ))
+        if rewards.get("pet_berserk_drop"):
+            lines.append(get_text("battle.berserk_drop_line", pet=rewards["pet_name"]))
+        if rewards.get("pet_pool_save"):
+            lines.append(get_text("battle.scavenger_save_line", pet=rewards["pet_name"]))
     if rewards.get("pet_levelled"):
         lines.append(get_text("pets.level_up", **rewards["pet_levelled"]))
     if rewards.get("leveled_up"):
@@ -840,6 +866,13 @@ def _defeat_report(battle: dict[str, Any], rewards: dict[str, Any]) -> str:
     lines.append("")
     for item in rewards.get("items") or []:
         lines.append(get_text("battle.defeat_loot", item=item.get("name")))
+    if rewards.get("pet_name"):
+        # Краб и в поражении при деле: тащит гнома и собирает остатки.
+        lines.append(get_text(
+            "battle.defeat_pet_xp", pet=rewards["pet_name"], xp=rewards.get("pet_xp", 0),
+        ))
+        if rewards.get("pet_greedy_save") and rewards.get("items"):
+            lines.append(get_text("battle.greedy_save_line", pet=rewards["pet_name"]))
     if rewards.get("pet_levelled"):
         lines.append(get_text("pets.level_up", **rewards["pet_levelled"]))
     lines.append(get_text("battle.defeat_end"))

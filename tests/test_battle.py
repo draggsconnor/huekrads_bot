@@ -719,6 +719,50 @@ class TestPetPerks:
         battle._apply_battle_defeat(player, state)
         assert [i["name"] for i in player["inventory"]] == ["🌿 Хвоя"]
 
+    def test_victory_report_credits_scavenger_and_pet_xp(self, tmp_path, monkeypatch):
+        """Докидка лута и XP краба видны в отчёте о победе."""
+        _setup_paths(tmp_path, monkeypatch)
+        # 0.9: пул мимо; 0.2: докидка Лутовика (25%) сработала.
+        monkeypatch.setattr(battle, "random", FakeRandom(seq=[0.9, 0.2]))
+        player = {"hp": 200, "max_hp": 200, "xp": 0, "inventory": []}
+        enemy = {"name": "Крыс", "tier": "common", "win_hits": 1, "dmg_per_hit": 25,
+                 "base_reward": 0, "loot": [], "pool_items": ["herb"]}
+        state = _battle(enemy=enemy, pet={"name": "🦀 Лутовик", "perks": {"scavenger": 0.25}})
+        state["player_attack"] = "head"
+        state["player_block"] = "head"
+
+        assert battle._resolve_round(state, player) == "victory"
+        rewards = battle._settle_battle(player, state, "victory")
+        text = battle._victory_report(state, rewards)
+        assert "🦀 Лутовик в деле: +10 XP напарнику" in text
+        assert "без него руки были бы пустыми" in text
+
+    def test_victory_report_credits_berserk_drop(self, tmp_path, monkeypatch):
+        """Повышенный берсерк-дроп отмечается отдельной строкой."""
+        _setup_paths(tmp_path, monkeypatch)
+        monkeypatch.setattr(battle, "random", FakeRandom(0.6))  # базовая 50% мимо, ярость 75% попала
+        player = {"hp": 200, "max_hp": 200, "xp": 0, "inventory": []}
+        enemy = {"name": "Крыс", "tier": "common", "win_hits": 1, "dmg_per_hit": 25,
+                 "base_reward": 0, "loot": [], "pool_items": ["herb"]}
+        state = _battle(enemy=enemy, pet={"name": "🦀 Берсерк", "perks": {"berserk": 0.75}})
+
+        rewards = battle._settle_battle(player, state, "victory")
+        text = battle._victory_report(state, rewards)
+        assert "🦀 Берсерк в деле: +10 XP напарнику" in text
+        assert "дроп щедрее обычного" in text
+
+    def test_defeat_report_credits_greedy_rescue(self, tmp_path, monkeypatch):
+        """Поражение: жадный сбор и +5 XP краба показываются в отчёте."""
+        _setup_paths(tmp_path, monkeypatch)
+        monkeypatch.setattr(battle, "random", FakeRandom(0.5))  # базовых 25% нет, жадных 60% есть
+        player = {"hp": 200, "max_hp": 200, "xp": 0, "inventory": []}
+        state = _battle(pet={"name": "🦀 Жадина", "perks": {"greedy": 0.6}})
+
+        rewards = battle._settle_battle(player, state, "defeat")
+        text = battle._defeat_report(state, rewards)
+        assert "🦀 Жадина тащит побитого гнома в лагерь: +5 XP напарнику" in text
+        assert "собрал то, что успел" in text
+
     def test_scout_hint_only_round_one_attack(self):
         state = _battle(pet={"name": "🦀 Краб", "perks": {"scout": True}})
         state["phase"] = "attack"
