@@ -53,7 +53,10 @@ async def expedition_expiration_job(context: ContextTypes.DEFAULT_TYPE) -> None:
                     context,
                     chat_id=chat_id,
                 )
-                logger.info("Expedition completed for user %s", user_id)
+                logger.info(
+                    "Checker completed expired expedition for user %s (loc %s, chat %s)",
+                    user_id, loc_id, chat_id,
+                )
             except Exception as e:
                 logger.error("Error sending expedition result for user %s: %s", user_id, e)
 

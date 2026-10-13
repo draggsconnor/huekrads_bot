@@ -223,6 +223,46 @@ async def admin_gnome_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     await schedule_self_delete(context, message)
 
 
+async def admin_expedition_finish_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """⚙️ /admin_gnome_finish <uid> — дожать висящую экспедицию вручную.
+
+    Использует тот же_atomic путь, что чекер и таймер: первый вызвавший
+    забирает завершение. Возвращает статус: завершилась или осталась
+    (активный бой отложит завершение; повтори позже).
+    """
+    user = update.effective_user
+    if not user or not is_admin(user.id):
+        if update.effective_message:
+            message = await update.effective_message.reply_text(
+                _get_text("adventure.admin_denied")
+            )
+            await schedule_self_delete(context, message)
+        return
+
+    args = context.args or []
+    if not args or not args[0].lstrip("-").isdigit():
+        message = await update.effective_message.reply_text(
+            _get_text("adventure.admin_finish_usage")
+        )
+        await schedule_self_delete(context, update.effective_message)
+        await schedule_self_delete(context, message)
+        return
+
+    uid = int(args[0])
+    logger.info("Admin %s forces expedition finish for %s", user.id, uid)
+    await send_expedition_result(uid, None, None, context)
+
+    player = get_player(uid)
+    still_active = isinstance(player.get("active_expedition"), dict)
+    if still_active:
+        text = _get_text("adventure.admin_finish_still", uid=uid)
+    else:
+        text = _get_text("adventure.admin_finish_done", uid=uid)
+    message = await update.effective_message.reply_text(text)
+    await schedule_self_delete(context, update.effective_message)
+    await schedule_self_delete(context, message)
+
+
 def get_player(user_id: int, pool: dict | None = None) -> dict[str, Any]:
     data = load_player_data()
     key = _player_key(user_id)
@@ -1720,6 +1760,10 @@ async def send_expedition_result(user_id: int, loc_id: str | None, username: str
 
     # Send the report to the chat where the expedition was started.
     target_chat_id = result.get("chat_id") or chat_id or user_id
+    logger.info(
+        "Expedition result for %s (loc %s) -> chat %s",
+        user_id, result.get("loc_id"), target_chat_id,
+    )
     try:
         sent = await context.bot.send_message(
             chat_id=target_chat_id,

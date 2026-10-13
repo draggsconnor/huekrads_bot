@@ -356,6 +356,9 @@ admin_name_usage: "⚙️ Формат: /admin_gnome_name &lt;user_id&gt; &lt;и
 admin_reset_usage: "⚙️ Формат: /admin_gnome_reset &lt;user_id&gt; — сбросить имя (гном снова безымянный)."
 admin_name_set: "⚙️ Гному {uid} установлено имя: <b>{name}</b>"
 admin_name_reset: "⚙️ Имя гнома {uid} сброшено."
+admin_finish_usage: "⚙️ Формат: /admin_gnome_finish &lt;user_id&gt; — досрочно завершить экспедицию гнома и отправить отчёт."
+admin_finish_done: "⚙️ Экспедиция {uid} завершена вручную, отчёт отправлен."
+admin_finish_still: "⚙️ Экспедиция {uid} пока не завершена (активный бой откладывает её) — повтори команду через минуту."
 
 adventure_stats_title: "📊 <b>Статистика экспедиций</b>"
 

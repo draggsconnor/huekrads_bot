@@ -18,6 +18,7 @@ from handlers.adventure import (
     adventure_inventory_command,
     adventure_name_command,
     adventure_stats_command,
+    admin_expedition_finish_command,
     admin_gnome_command,
     gnome_name_callback,
     inventory_callback,
@@ -113,6 +114,7 @@ def main() -> None:
     application.add_handler(CommandHandler("adventure_name", adventure_name_command))
     application.add_handler(CommandHandler("admin_gnome_name", admin_gnome_command))
     application.add_handler(CommandHandler("admin_gnome_reset", admin_gnome_command))
+    application.add_handler(CommandHandler("admin_gnome_finish", admin_expedition_finish_command))
     application.add_handler(CommandHandler("adventure_stats", adventure_stats_command))
     application.add_handler(CommandHandler("adventure_inventory", adventure_inventory_command))
     application.add_handler(CommandHandler("adventure_huecrab", adventure_huecrab_command))

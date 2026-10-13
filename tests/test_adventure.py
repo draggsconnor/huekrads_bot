@@ -549,6 +549,64 @@ class TestAdminGnomeName:
         assert "Формат" in reply.await_args.args[0]
 
 
+class TestAdminExpeditionFinish:
+    """/admin_gnome_finish — досрочное завершение висящей экспедиции."""
+
+    async def _run(self, monkeypatch, fake_context, text, is_admin=True):
+        monkeypatch.setattr(adv, "is_admin", lambda uid: is_admin)
+        reply = AsyncMock(return_value=SimpleNamespace(chat_id=-42, message_id=950))
+        await adv.admin_expedition_finish_command(
+            SimpleNamespace(
+                effective_user=SimpleNamespace(id=999),
+                effective_message=SimpleNamespace(chat_id=-42, message_id=951, text=text, reply_text=reply),
+            ),
+            SimpleNamespace(
+                args=text.split()[1:], user_data={},
+                job_queue=None, bot=fake_context.bot,
+            ),
+        )
+        return reply
+
+    async def test_sends_finishing_job_for_active_expedition(self, tmp_path, monkeypatch, fake_context):
+        data_path = tmp_path / "player_data.json"
+        now = datetime.now(timezone.utc)
+        with open(data_path, "w", encoding="utf-8") as f:
+            json.dump({"555": {
+                "hp": 200, "max_hp": 200, "lvl": 1,
+                "active_expedition": {
+                    "location_id": "dark_forest",
+                    "username": "Игрок",
+                    "start_time": (now - timedelta(minutes=7)).isoformat(),
+                    "end_time": (now - timedelta(minutes=1)).isoformat(),
+                    "chat_id": -42,
+                },
+            }}, f, ensure_ascii=False)
+        monkeypatch.setattr(adv, "PLAYER_DATA_PATH", str(data_path))
+        fake_context.bot.send_message = AsyncMock(
+            return_value=SimpleNamespace(chat_id=-42, message_id=770),
+        )
+
+        reply = await self._run(monkeypatch, fake_context, "/admin_gnome_finish 555")
+        # send_expedition_result отправил отчёт в чат.
+        fake_context.bot.send_message.assert_awaited()
+        # Экспедиция закрыта — админ получил «завершена».
+        assert "завершена" in reply.await_args.args[0]
+        assert reply.await_args.args[0].endswith("555") or " 555" in reply.await_args.args[0] or \
+            str(555) in reply.await_args.args[0]
+        # Отчёт ушёл в чат экспедиции.
+        assert fake_context.bot.send_message.await_args.kwargs["chat_id"] == -42
+
+    async def test_non_admin_denied(self, monkeypatch, fake_context):
+        reply = await self._run(monkeypatch, fake_context, "/admin_gnome_finish 555", is_admin=False)
+        assert "админская" in reply.await_args.args[0]
+        fake_context.bot.send_message.assert_not_awaited()
+
+    async def test_usage_without_args(self, monkeypatch, fake_context):
+        reply = await self._run(monkeypatch, fake_context, "/admin_gnome_finish")
+        assert "Формат" in reply.await_args.args[0]
+        fake_context.bot.send_message.assert_not_awaited()
+
+
 class TestForge:
     """⚒ Кузня: крафт из материалов, надевание и снятие снаряжения."""
 
