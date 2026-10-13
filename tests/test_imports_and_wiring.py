@@ -49,6 +49,7 @@ def test_bot_command_menu_preserves_descriptions_and_order():
         ("help", "Справка"),
         ("adventure", "Экспедиции"),
         ("adventure_name", "Имя гнома"),
+        ("adventure_equipment", "Снаряжение гнома"),
         ("adventure_stats", "Статистика экспедиции"),
         ("adventure_inventory", "Инвентарь экспедиции"),
         ("adventure_huecrab", "Хуекраб"),

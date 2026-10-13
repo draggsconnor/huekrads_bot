@@ -652,28 +652,41 @@ class TestForge:
         await adv.adventure_callback(
             SimpleNamespace(
                 callback_query=q,
-                effective_user=SimpleNamespace(id=1001),
+                effective_user=SimpleNamespace(id=1001, username="tester"),
             ),
             fake_context,
         )
         return q
 
-    async def test_forge_screen_lists_recipes_and_knarki(self, tmp_path, monkeypatch, fake_context):
+    async def test_forge_screen_has_categories(self, tmp_path, monkeypatch, fake_context):
         data_path = self._data(tmp_path)
         self._setup(tmp_path, monkeypatch, data_path)
 
         q = await self._forge_render(monkeypatch, fake_context, data_path, "adv_forge")
         args, kwargs = q.edit_message_text.await_args
         assert "Кузня" in args[0]
-        assert "Топорик дровосека" in args[0]
-        # Формат «нужно/есть»: у пустого инвентаря «×3/0».
-        assert "🪵 Древесина ×3/0" in args[0]
-        assert "ЗАПАС МАТЕРИАЛОВ" in args[0]
-        assert "Древесина: 0 шт." in args[0]
-        # Кнопки крафта + назад
+        assert "штаны из берёзовой коры" in args[0]
+        assert "tester" in args[0]
+        # Кнопки: 5 категорий + назад
         callbacks = [b.callback_data for row in kwargs["reply_markup"].inline_keyboard for b in row]
-        assert "adv_craft_wood_axe" in callbacks
+        for slot in ("weapon", "head", "body", "dick", "trinket"):
+            assert f"adv_recipes_{slot}" in callbacks
         assert "adv_back" in callbacks
+
+    async def test_forge_category_screen_recipe_counts(self, tmp_path, monkeypatch, fake_context):
+        """/adv_recipes_weapon: рецепты «нужно/есть» + запас материалов."""
+        data_path = self._data(tmp_path)
+        self._setup(tmp_path, monkeypatch, data_path)
+
+        q = await self._forge_render(monkeypatch, fake_context, data_path, "adv_recipes_weapon")
+        args, kwargs = q.edit_message_text.await_args
+        assert "Рецепты оружия" in args[0]
+        assert "🪵 Древесина ×3/0" in args[0]          # пустой инвентарь
+        assert "ЗАПАС МАТЕРИАЛОВ" in args[0]
+        callbacks = [b.callback_data for row in kwargs["reply_markup"].inline_keyboard for b in row]
+        assert "adv_craftr_weapon_wood_axe" in callbacks
+        assert "adv_forge" in callbacks                # ← кузня
+        assert "adv_back" in callbacks                 # назад к локациям
 
     async def test_locations_list_has_forge_button(self, tmp_path, monkeypatch):
         keyboard = adv._locations_keyboard({"dark_forest": {"name": "Лес"}})
@@ -688,7 +701,7 @@ class TestForge:
         self._setup(tmp_path, monkeypatch, data_path)
         fake_context.bot.edit_message_text = AsyncMock()
 
-        q = await self._forge_render(monkeypatch, fake_context, data_path, "adv_craft_wood_axe")
+        q = await self._forge_render(monkeypatch, fake_context, data_path, "adv_craftr_weapon_wood_axe")
 
         q.answer.assert_awaited_once()
         assert "Сковано" in q.answer.await_args.args[0]
@@ -702,27 +715,54 @@ class TestForge:
         data_path = self._data(tmp_path, inventory=[{"name": "🪵 Древесина", "quantity": 1}])
         self._setup(tmp_path, monkeypatch, data_path)
 
-        q = await self._forge_render(monkeypatch, fake_context, data_path, "adv_craft_wood_axe")
+        q = await self._forge_render(monkeypatch, fake_context, data_path, "adv_craftr_weapon_wood_axe")
         q.edit_message_text.assert_not_awaited()          # экран не отрисовался
         answer_text = q.answer.await_args.args[0]
         assert "Не хватает" in answer_text
         assert "Смола" in answer_text
 
-    async def test_equip_then_unequip_roundtrip(self, tmp_path, monkeypatch, fake_context):
+    async def test_equipment_command_and_roundtrip(self, tmp_path, monkeypatch, fake_context):
+        """/adventure_equipment: надеть через экран команды, снять там же."""
         inventory = [{"name": "🪓 Топорик дровосека", "gear_id": "wood_axe", "quantity": 1}]
         data_path = self._data(tmp_path, inventory=inventory)
         self._setup(tmp_path, monkeypatch, data_path)
 
-        # Надели.
-        await self._forge_render(monkeypatch, fake_context, data_path, "adv_gear_on_wood_axe")
+        # Команда: экран с кнопкой «НАДЕТЬ».
+        reply = AsyncMock(return_value=SimpleNamespace(chat_id=-42, message_id=650))
+        await adv.adventure_equipment_command(
+            SimpleNamespace(
+                effective_user=SimpleNamespace(id=1001, username="tester"),
+                effective_message=SimpleNamespace(chat_id=-42, message_id=651, reply_text=reply),
+            ),
+            fake_context,
+        )
+        markup = reply.await_args.kwargs["reply_markup"]
+        buttons = [(b.text, b.callback_data)
+                   for row in markup.inline_keyboard for b in row]
+        assert any("НАДЕТЬ" in t and cd == "adv_gear_on_wood_axe" for t, cd in buttons)
+        assert not any("СНЯТЬ" in t for t, cd in buttons)
+
+        # Надели через колбэк — экран перерисовался с «СНЯТЬ».
+        q = self._query("adv_gear_on_wood_axe")
+        await adv.adventure_callback(
+            SimpleNamespace(callback_query=q, effective_user=SimpleNamespace(id=1001, username="tester")),
+            fake_context,
+        )
         stored = json.load(open(data_path, encoding="utf-8"))["1001"]
         assert stored["equipment"]["weapon"] == "wood_axe"
-        assert all(i.get("gear_id") != "wood_axe" for i in stored["inventory"])
+        redraw_args = q.edit_message_text.await_args.kwargs
+        redraw_buttons = [b.callback_data
+                          for row in redraw_args["reply_markup"].inline_keyboard for b in row]
+        assert "adv_gear_off_weapon" in redraw_buttons
 
         # Сняли — вернулся в инвентарь.
-        await self._forge_render(monkeypatch, fake_context, data_path, "adv_gear_off_weapon")
+        q2 = self._query("adv_gear_off_weapon")
+        await adv.adventure_callback(
+            SimpleNamespace(callback_query=q2, effective_user=SimpleNamespace(id=1001, username="tester")),
+            fake_context,
+        )
         stored = json.load(open(data_path, encoding="utf-8"))["1001"]
-        assert stored["equipment"]["weapon"] in (None,)
+        assert stored["equipment"]["weapon"] is None
         assert any(i.get("gear_id") == "wood_axe" for i in stored["inventory"])
 
     async def test_equip_missing_instance_rejected(self, tmp_path, monkeypatch, fake_context):

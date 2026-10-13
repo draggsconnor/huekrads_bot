@@ -15,6 +15,7 @@ from database import init_db
 from handlers.adventure import (
     adventure_callback,
     adventure_command,
+    adventure_equipment_command,
     adventure_inventory_command,
     adventure_name_command,
     adventure_stats_command,
@@ -51,6 +52,7 @@ BOT_COMMANDS = [
     BotCommand("help", get_text("menu.commands.help")),
     BotCommand("adventure", get_text("menu.commands.adventure")),
     BotCommand("adventure_name", get_text("menu.commands.name")),
+    BotCommand("adventure_equipment", get_text("menu.commands.equipment")),
     BotCommand("adventure_stats", get_text("menu.commands.adventure_stats")),
     BotCommand("adventure_inventory", get_text("menu.commands.adventure_inventory")),
     BotCommand("adventure_huecrab", get_text("menu.commands.huecrab")),
@@ -117,6 +119,7 @@ def main() -> None:
     application.add_handler(CommandHandler("admin_gnome_finish", admin_expedition_finish_command))
     application.add_handler(CommandHandler("adventure_stats", adventure_stats_command))
     application.add_handler(CommandHandler("adventure_inventory", adventure_inventory_command))
+    application.add_handler(CommandHandler("adventure_equipment", adventure_equipment_command))
     application.add_handler(CommandHandler("adventure_huecrab", adventure_huecrab_command))
     application.add_handler(CommandHandler("adventure_huecrab_name", adventure_huecrab_name_command))
     application.add_handler(CommandHandler("adventure_saray", adventure_saray_command))

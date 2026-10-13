@@ -30,6 +30,7 @@ docker compose up -d --build
 | /start | Список локаций экспедиции |
 | /adventure | Список локаций экспедиции |
 | /adventure_name | Назвать гнома (один раз навсегда, после — «Имя (username)» всюду) |
+| /adventure_equipment | Снаряжение гнома: кнопки «НАДЕТЬ/СНЯТЬ», живёт 5 минут |
 | /adventure_stats | Статистика экспедиции |
 | /adventure_inventory | Инвентарь экспедиции |
 | /adventure_huecrab | Карточка хуекраба |

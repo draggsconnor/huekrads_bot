@@ -1,6 +1,7 @@
 commands:
   adventure: "Экспедиции"
   name: "Имя гнома"
+  equipment: "Снаряжение гнома"
   adventure_stats: "Статистика экспедиции"
   adventure_inventory: "Инвентарь экспедиции"
   huecrab: "Хуекраб"
@@ -11,8 +12,9 @@ commands:
 help_text: |
   🗺️ Экспедиции HueKrads
 
-  /adventure — выбрать локацию и отправить гнома
+  /adventure — выбрать локацию и отправить гнома (⚒ КУЗНЯ и здесь)
   /adventure_name — назвать гнома (один раз навсегда)
+  /adventure_equipment — снаряжение гнома (надеть/снять вещи)
   /adventure_stats — статистика
   /adventure_inventory — инвентарь (фрукты здесь можно съесть)
   /adventure_huecrab — карточка хуекраба

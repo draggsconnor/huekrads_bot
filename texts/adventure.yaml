@@ -365,17 +365,36 @@ admin_finish_still: "⚙️ Экспедиция {uid} пока не завер�
 adventure_stats_title: "📊 <b>Статистика экспедиций</b>"
 
 # Кузня: крафт снаряжения и надевание (кнопка с списке локаций)
+forge_title: "⚒️ Кузня — наконец-то {player} может сковать себе штаны из берёзовой коры и другие великолепные вещи!"
+forge_equip_hint: "Материалы дают мобы экспедиций: лес — смола и древесина, шахта — камень и кварц, драконье логово — чешуя. Надеть и снять — /adventure_equipment."
 forge_button: "⚒ КУЗНЯ"
-forge_title: "⚒ <b>Кузня</b> — гном берёт в руки конкретную вахту"
 forge_weapon_line: "🗡 Оружие: {name}"
 forge_armor_line: "🛡 Броня: {names}"
 forge_trinket_line: "🎪 Талисман: {name}"
 forge_nothing: "нихуя"
-forge_craft_section: "<b>— СКОВАТЬ (материалы из инвентаря) —</b>"
 forge_recipe_line: "{name} — {costs}"
 forge_stock_header: "<b>— ЗАПАС МАТЕРИАЛОВ (есть у тебя) —</b>"
 forge_stock_line: "• {name}: {count} шт."
 forge_stock_empty: "• Материалов нет вообще — иди фармить."
+forge_slot_unknown: "Такого раздела рецептов нет."
+
+# Категории рецептов (кнопки кузни)
+forge_cat_weapon: "⚙ РЕЦЕПТЫ ОРУЖИЯ"
+forge_cat_dick: "👖 РЕЦЕПТЫ ПОРТКОВ"
+forge_cat_body: "👕 РЕЦЕПТЫ БРОНИ"
+forge_cat_head: "🧢 РЕЦЕПТЫ ШАПОК"
+forge_cat_trinket: "🎪 РЕЦЕПТЫ ТАЛИСМАНОВ"
+forge_cat_title_weapon: "⚙ <b>Рецепты оружия</b>"
+forge_cat_title_dick: "👖 <b>Рецепты портков</b>"
+forge_cat_title_body: "👕 <b>Рецепты брони</b>"
+forge_cat_title_head: "🧢 <b>Рецепты шапок</b>"
+forge_cat_title_trinket: "🎪 <b>Рецепты талисманов</b>"
+forge_back_to_forge: "← кузня"
+
+# /adventure_equipment — снряжение гнома
+equipment_title: "⚙ <b>Снаряжение гнома</b>"
+equipment_unequip_button: "🔻 СНЯТЬ {name}"
+equipment_equip_button: "➕ НАДЕТЬ {name} ×{count}"
 forge_not_enough: "Не хватает: {missing}"
 forge_crafted: "⚒ Сковано: {name}"
 forge_equip_toast: "Надето: {name}"
