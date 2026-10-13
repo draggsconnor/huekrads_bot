@@ -3,6 +3,8 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import pytest
+
 import handlers.adventure as adv
 import handlers.battle as battle
 
@@ -188,6 +190,12 @@ class TestPlanEncounter:
         monkeypatch.setattr(battle, "random", FakeRandom(0.0))
         # latest = max(31.0, 0) -> uniform(30, 31)
         assert battle.plan_encounter({"encounter_chance": 1.0}, 60) == 30.0
+
+    def test_production_locations_battle_chance_is_90(self):
+        """Шанс встречи врага в обеих прод-локациях — 90%."""
+        locations = battle.load_locations()
+        for loc_id in ("dark_forest", "abandoned_mine"):
+            assert locations[loc_id]["encounter_chance"] == pytest.approx(0.9)
 
 
 class TestBuildBattleEnemy:
