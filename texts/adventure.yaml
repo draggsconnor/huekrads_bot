@@ -377,6 +377,7 @@ forge_stock_header: "<b>— ЗАПАС МАТЕРИАЛОВ (есть у теб�
 forge_stock_line: "• {name}: {count} шт."
 forge_stock_empty: "• Материалов нет вообще — иди фармить."
 forge_slot_unknown: "Такого раздела рецептов нет."
+forge_cat_badge: "{label} [{count}]"
 
 # Категории рецептов (кнопки кузни)
 forge_cat_weapon: "⚔️ РЕЦЕПТЫ ОРУЖИЯ"

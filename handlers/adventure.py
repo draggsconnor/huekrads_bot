@@ -676,12 +676,23 @@ def _forge_text(player: dict[str, Any], username: str) -> str:
 
 
 def _forge_keyboard(player: dict[str, Any]) -> InlineKeyboardMarkup:
-    """Кнопки кузни: категории рецептов + назад к локациям."""
-    rows: list[list[InlineKeyboardButton]] = [
-        [InlineKeyboardButton(_get_text(f"adventure.forge_cat_{slot}"),
-                              callback_data=f"{FORGE_RECIPES_CALLBACK}{slot}")]
-        for slot in FORGE_CATEGORIES
-    ]
+    """Кнопки кузни: категории рецептов + назад к локациям.
+
+    На кнопке категории — пометка [N]: сколько рецептов этой категории
+    прямо сейчас можно сковать из имеющихся материалов.
+    """
+    rows: list[list[InlineKeyboardButton]] = []
+    for slot in FORGE_CATEGORIES:
+        label = _get_text(f"adventure.forge_cat_{slot}")
+        craftable = sum(
+            1 for recipe in _recipes_for_slot(slot)
+            if not _check_materials(player, recipe.get("materials") or [])
+        )
+        if craftable:
+            label = _get_text("adventure.forge_cat_badge", label=label, count=craftable)
+        rows.append([InlineKeyboardButton(
+            label, callback_data=f"{FORGE_RECIPES_CALLBACK}{slot}",
+        )])
     rows.append([InlineKeyboardButton(
         _get_text("adventure.button_back_to_locations"), callback_data="adv_back",
     )])

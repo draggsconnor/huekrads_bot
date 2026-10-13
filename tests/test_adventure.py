@@ -667,11 +667,40 @@ class TestForge:
         assert "Кузня" in args[0]
         assert "штаны из берёзовой коры" in args[0]
         assert "tester" in args[0]
-        # Кнопки: 5 категорий + назад
+        # Кнопки: 5 категорий + назад; материалов нет — без пометок [N].
+        labels = [b.text for row in kwargs["reply_markup"].inline_keyboard for b in row]
+        assert any("РЕЦЕПТЫ ОРУЖИЯ" in t for t in labels)
+        assert not any("[" in t for t in labels)
         callbacks = [b.callback_data for row in kwargs["reply_markup"].inline_keyboard for b in row]
         for slot in ("weapon", "head", "body", "dick", "trinket"):
             assert f"adv_recipes_{slot}" in callbacks
         assert "adv_back" in callbacks
+
+    async def test_forge_badge_counts_craftable(self, tmp_path, monkeypatch, fake_context):
+        """На кнопке категории — [N] если на N рецептов хватает материалов."""
+        inventory = [
+            {"name": "🪵 Древесина", "quantity": 3},
+            {"name": "👑 Смола Барона", "quantity": 1},
+        ]
+        data_path = self._data(tmp_path, inventory=inventory)
+        self._setup(tmp_path, monkeypatch, data_path)
+
+        q = await self._forge_render(monkeypatch, fake_context, data_path, "adv_forge")
+        labels = [b.text for row in q.edit_message_text.await_args.kwargs["reply_markup"].inline_keyboard for b in row]
+        assert any("РЕЦЕПТЫ ОРУЖИЯ [1]" in t for t in labels)
+        # С «выломать» категория даёт второй рецепт (лопата: древесина+камень — камня нет).
+        assert any("ШАПОК" in t and "[1]" not in t for t in labels)
+
+    async def test_forge_no_badge_when_nothing_craftable(self, tmp_path, monkeypatch, fake_context):
+        """Ноль скова — чистая кнопка без [0]."""
+        inventory = [{"name": "🪵 Древесина", "quantity": 10}]  # без смолы топор не собирается
+        data_path = self._data(tmp_path, inventory=inventory)
+        self._setup(tmp_path, monkeypatch, data_path)
+
+        q = await self._forge_render(monkeypatch, fake_context, data_path, "adv_forge")
+        labels = [b.text for row in q.edit_message_text.await_args.kwargs["reply_markup"].inline_keyboard for b in row]
+        assert any("РЕЦЕПТЫ ОРУЖИЯ" in t and "[1]" not in t for t in labels)
+        assert not any(t.endswith("[0]") or "[0]" in t for t in labels)
 
     async def test_forge_category_screen_recipe_counts(self, tmp_path, monkeypatch, fake_context):
         """/adv_recipes_weapon: рецепты «нужно/есть» + запас материалов."""
