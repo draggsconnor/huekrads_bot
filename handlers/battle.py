@@ -57,6 +57,52 @@ JOURNAL_LIMIT = 20
 # Отчёт о победе/поражении (итоги боя) живёт две минуты, потом стирается.
 BATTLE_REPORT_DELETE_DELAY = 120
 
+# Голые руки: гном без оружия дерётся «нихуя» — базовый урон за попадание.
+BARE_HANDS_DMG = 20
+
+GEAR_SLOTS = ("weapon", "head", "body", "dick", "trinket")
+
+
+def build_gear_snapshot(player: dict[str, Any]) -> dict[str, Any]:
+    """Разрешить equipment игрока в снапшот для боя (как перки краба).
+
+    equipment: {slot: itemId} — id из global_pool.json → "gear".
+    Возврат: {slot: {…атрибуты предмета…}} (только что-либо надетое).
+    """
+    equipment = player.get("equipment") or {}
+    catalog = (load_global_pool().get("gear") or {})
+    snapshot: dict[str, Any] = {}
+    for slot in GEAR_SLOTS:
+        item_id = equipment.get(slot)
+        entry = catalog.get(item_id) if item_id else None
+        if isinstance(entry, dict):
+            snapshot[slot] = {**entry, "_id": item_id}
+    return snapshot
+
+
+def _weapon_damage(gear: dict[str, Any] | None, loc_id: str | None) -> tuple[int, bool]:
+    """Урон за попадание: оружие + локационный бонус + бросок крита (×2)."""
+    weapon = (gear or {}).get("weapon") or {}
+    dmg = int(weapon.get("dmg", 0) or 0) or BARE_HANDS_DMG
+    bonus = (weapon.get("loc_bonus") or {}).get(loc_id or "")
+    if bonus:
+        dmg = int(dmg * float(bonus))
+    crit = False
+    crit_chance = float(weapon.get("crit_chance", 0) or 0)
+    if crit_chance and random.random() < crit_chance:
+        dmg *= 2
+        crit = True
+    return dmg, crit
+
+
+def _zone_guard(gear: dict[str, Any] | None, zone: str) -> int:
+    """Сколько урона гасит броня, надетая на конкретную зону боя."""
+    piece = (gear or {}).get(zone) or {}
+    try:
+        return int(piece.get("zone_guard", 0) or 0)
+    except (TypeError, ValueError):
+        return 0
+
 TIER_XP = {"common": 10, "uncommon": 15, "rare": 25}
 BOSS_XP_BASE = 10
 ITEM_DROP_CHANCE = 0.5
@@ -103,10 +149,10 @@ def plan_encounter(loc: dict[str, Any], duration_seconds: int) -> float | None:
 # ---------------------------------------------------------------------------
 
 def _battle_defaults(mobs_data: dict[str, Any], tier: str) -> dict[str, int]:
-    """win_hits / dmg_per_hit defaults for a tier (mobs.json battle_defaults)."""
+    """hp / dmg_per_hit defaults for a tier (mobs.json battle_defaults)."""
     defaults = (mobs_data.get("battle_defaults") or {}).get(tier) or {}
     return {
-        "win_hits": int(defaults.get("win_hits", 1) or 1),
+        "hp": int(defaults.get("hp", 40) or 40),
         "dmg_per_hit": int(defaults.get("dmg_per_hit", 25) or 25),
     }
 
@@ -139,7 +185,7 @@ def build_battle_enemy(loc_id: str) -> dict[str, Any] | None:
                 or _get_text("adventure.unknown_mob"),
                 "desc": boss.get("description"),
                 "tier": "boss",
-                "win_hits": int(cfg.get("win_hits", defaults["win_hits"])),
+                "hp": int(cfg.get("hp", defaults["hp"])),
                 "dmg_per_hit": int(cfg.get("dmg_per_hit", defaults["dmg_per_hit"])),
                 "base_reward": int(boss.get("base_reward", 0) or 0),
                 "loot": boss.get("loot") or [],
@@ -186,7 +232,7 @@ def build_battle_enemy(loc_id: str) -> dict[str, Any] | None:
             "name": name,
             "desc": desc,
             "tier": tier,
-            "win_hits": int(cfg.get("win_hits", defaults["win_hits"])),
+            "hp": int(cfg.get("hp", defaults["hp"])),
             "dmg_per_hit": int(cfg.get("dmg_per_hit", defaults["dmg_per_hit"])),
             "base_reward": 0,
             "loot": pick.get("loot") or [],
@@ -217,7 +263,7 @@ def build_battle_enemy(loc_id: str) -> dict[str, Any] | None:
         "name": random.choice(names),
         "desc": None,
         "tier": rarity,
-        "win_hits": defaults["win_hits"],
+        "hp": defaults["hp"],
         "dmg_per_hit": defaults["dmg_per_hit"],
         "base_reward": 0,
         "loot": [],
@@ -247,6 +293,7 @@ def _new_battle(expedition: dict[str, Any]) -> dict[str, Any] | None:
         "chat_id": expedition.get("chat_id"),
         "username": expedition.get("username"),
         "enemy": enemy,
+        "enemy_hp": int(enemy.get("hp", 40)),
         "round": 0,
         "phase": "attack",
         "enemy_attack": None,
@@ -256,10 +303,12 @@ def _new_battle(expedition: dict[str, Any]) -> dict[str, Any] | None:
         "auto_attack": False,
         "auto_block": False,
         "phase_deadline": None,
-        "hits": 0,
         "dmg_taken": 0,
+        "dmg_dealt": 0,
+        "crits": 0,
         "journal": [],
         "pet": None,
+        "gear": {},
         "message_id": None,
     }
 
@@ -293,14 +342,15 @@ def _roll_loot(loot_table: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def _resolve_round(battle: dict[str, Any], player: dict[str, Any]) -> str:
     """Settle the current round. Returns 'continue' | 'victory' | 'defeat'.
 
-    The player's attack hits when it differs from the enemy's hidden block
-    zone. The winning hit cancels the enemy's counter-attack (ties favour
-    the player). A wrong block costs `dmg_per_hit`; defeat when the
-    accumulated damage reaches the player's HP.
+    Атака гнома попала (зона ≠ блок врага) — враг теряет HP цифрами:
+    урон от оружия (голые руки — «нихуя», 20), крит ×2 по шансу оружия.
+    Враг падает, когда его HP кончается. Пропущенный блок стоит
+    `dmg_per_hit` минус защиту брони на зоне удара врага. Победное
+    попадание гасит ответку; поражение — когда скопился урон ≥ HP гнома.
     """
     enemy = battle["enemy"]
-    win_hits = int(enemy.get("win_hits", 1))
     dmg_per_hit = int(enemy.get("dmg_per_hit", 25))
+    gear = battle.get("gear") or {}
 
     attack = battle.get("player_attack") or random.choice(ZONES)
     block = battle.get("player_block") or random.choice(ZONES)
@@ -316,10 +366,17 @@ def _resolve_round(battle: dict[str, Any], player: dict[str, Any]) -> str:
 
     hit = attack != battle.get("enemy_block")
     entry["hit"] = hit
-    if hit:
-        battle["hits"] = int(battle.get("hits", 0)) + 1
 
-    if hit and battle["hits"] >= win_hits:
+    if hit:
+        dmg_dealt, crit = _weapon_damage(gear, battle.get("location_id"))
+        entry["dmg_dealt"] = dmg_dealt
+        if crit:
+            entry["crit"] = True
+            battle["crits"] = int(battle.get("crits", 0)) + 1
+        battle["dmg_dealt"] = int(battle.get("dmg_dealt", 0)) + dmg_dealt
+        battle["enemy_hp"] = int(battle.get("enemy_hp", enemy.get("hp", 40))) - dmg_dealt
+
+    if hit and int(battle.get("enemy_hp", 0)) <= 0:
         # Победное попадание — ответный удар в этом раунде не проходит.
         entry["blocked"] = None
         entry["dmg"] = 0
@@ -336,7 +393,14 @@ def _resolve_round(battle: dict[str, Any], player: dict[str, Any]) -> str:
         blocked = True
         entry["pet_save"] = pet.get("name")
     entry["blocked"] = blocked
-    dmg = 0 if blocked else dmg_per_hit
+    raw_dmg = 0 if blocked else dmg_per_hit
+    if not blocked:
+        guard = _zone_guard(gear, battle.get("enemy_attack") or "")
+        guard = min(guard, dmg_per_hit - 1)  # броня не обнуляет удар полностью
+        if guard:
+            entry["guard"] = guard
+        raw_dmg = max(0, dmg_per_hit - guard)
+    dmg = raw_dmg
     if dmg:
         battle["dmg_taken"] = int(battle.get("dmg_taken", 0)) + dmg
     entry["dmg"] = dmg
@@ -370,6 +434,9 @@ def _apply_battle_victory(player: dict[str, Any], battle: dict[str, Any]) -> dic
 
     items: list[dict[str, Any]] = []
     pet = (battle.get("pet") or {})
+    gear = (battle.get("gear") or {})
+    trinket_loot = None
+    trinket_loot_item = None
     pet_perks = (pet.get("perks") or {})
     # Флаги участия краба — для строк заслуги в отчёте о победе.
     pet_berserk_drop = False
@@ -391,6 +458,25 @@ def _apply_battle_victory(player: dict[str, Any], battle: dict[str, Any]) -> dic
         item_id = random.choice(enemy["pool_items"])
         items.append({"name": _pool_item_name(item_id), "quantity": 1})
         pet_pool_save = True
+    # 🎪 Талисман-воришка: своя докидка лута (не мешает крабовой).
+    trinket = gear.get("trinket") or {}
+    toss_chance = float(trinket.get("loot_toss", 0) or 0)
+    if toss_chance and enemy.get("pool_items") and random.random() < toss_chance:
+        item_id = random.choice(enemy["pool_items"])
+        trinket_item_name = _pool_item_name(item_id)
+        items.append({"name": trinket_item_name, "quantity": 1})
+        trinket_loot = trinket.get("name")
+        trinket_loot_item = trinket_item_name
+    # 🪏 Лопата: не оружие ради урона — раскапывает после победы клад.
+    dig_chance = float((gear.get("weapon") or {}).get("dig_loot", 0) or 0)
+    dig_loot_item = None
+    if dig_chance:
+        loc = load_locations().get(battle.get("location_id")) or {}
+        resources = loc.get("resources") or []
+        if resources and random.random() < dig_chance:
+            resource = random.choice(resources)
+            dig_loot_item = resource.get("name", resource.get("id", "?"))
+            items.append({"name": dig_loot_item, "quantity": 1})
     if items:
         player["inventory"] = list(player.get("inventory", [])) + items
 
@@ -408,6 +494,12 @@ def _apply_battle_victory(player: dict[str, Any], battle: dict[str, Any]) -> dic
         "pet_name": pet.get("name"),
         "pet_berserk_drop": pet_berserk_drop,
         "pet_pool_save": pet_pool_save,
+        "trinket_loot": trinket_loot,
+        "trinket_loot_item": trinket_loot_item,
+        "dig_loot_item": dig_loot_item,
+        "weapon_name": (gear.get("weapon") or {}).get("name"),
+        "dmg_dealt": int(battle.get("dmg_dealt", 0)),
+        "crits": int(battle.get("crits", 0)),
     }
     return rewards
 
@@ -420,15 +512,25 @@ def _apply_battle_defeat(player: dict[str, Any], battle: dict[str, Any]) -> dict
     items: list[dict[str, Any]] = []
     # Хуекраб-Жадина/Королевский: при поражении колючеусый тариф выше базового.
     pet = (battle.get("pet") or {})
+    gear = (battle.get("gear") or {})
     pet_perks = (pet.get("perks") or {})
     pet_greedy_save = False
     loot_chance = pet_perks.get("greedy") or DEFEAT_LOOT_CHANCE
     loc = load_locations().get(battle.get("location_id")) or {}
     resources = loc.get("resources") or []
+    trinket_keep = None
+    trinket_keep_item = None
     if resources and random.random() < loot_chance:
         resource = random.choice(resources)
         items.append({"name": resource.get("name", resource.get("id", "?")), "quantity": 1})
         pet_greedy_save = bool(pet_perks.get("greedy"))
+    # 🧿 Оберег: придерживает вещи, когда гном бьют домой несёте.
+    keep_chance = float((gear.get("trinket") or {}).get("defeat_keep", 0) or 0)
+    if keep_chance and resources and random.random() < keep_chance:
+        resource = random.choice(resources)
+        trinket_keep_item = resource.get("name", resource.get("id", "?"))
+        items.append({"name": trinket_keep_item, "quantity": 1})
+        trinket_keep = (gear.get("trinket") or {}).get("name")
     if items:
         player["inventory"] = list(player.get("inventory", [])) + items
     return {
@@ -436,6 +538,8 @@ def _apply_battle_defeat(player: dict[str, Any], battle: dict[str, Any]) -> dict
         "pet_name": pet.get("name"),
         "pet_greedy_save": pet_greedy_save,
         "pet_xp": PET_XP_ON_DEFEAT,
+        "trinket_keep": trinket_keep,
+        "trinket_keep_item": trinket_keep_item,
     }
 
 
@@ -520,6 +624,7 @@ def try_start_battle(user_id: int) -> dict[str, Any] | None:
         pet = player.get("pet")
         if isinstance(pet, dict) and pet.get("name"):
             battle["pet"] = {"name": pet.get("name"), "perks": dict(pet.get("perks") or {})}
+        battle["gear"] = build_gear_snapshot(player)
         player["active_battle"] = battle
         save_player_data(data)
         return battle
@@ -664,12 +769,33 @@ def _battle_username(battle: dict[str, Any]) -> str:
 
 def _battle_status(battle: dict[str, Any]) -> str:
     enemy = battle.get("enemy") or {}
+    enemy_max = int(enemy.get("hp", 40))
     return get_text(
         "battle.status",
-        hits=battle.get("hits", 0),
-        win_hits=enemy.get("win_hits", 1),
+        enemy_hp=max(0, int(battle.get("enemy_hp", enemy_max))),
+        enemy_max=enemy_max,
         dmg=battle.get("dmg_taken", 0),
     )
+
+
+def _gear_line(battle: dict[str, Any]) -> str | None:
+    """Строка экипировки в сообщении боя — участие шмоток видно всегда.
+
+    Пустые слоты честно показываются canon-словом «нихуя», чтобы отсутствие
+    брони тоже было фактом, а не тишиной.
+    """
+    gear = battle.get("gear") or {}
+    weapon = gear.get("weapon") or {}
+    armor = [gear[slot]["name"] for slot in ("head", "body", "dick") if gear.get(slot)]
+    line = get_text(
+        "battle.gear_line",
+        weapon=weapon.get("name") or get_text("battle.empty_weapon"),
+        armor=", ".join(armor) or get_text("battle.no_armor"),
+    )
+    trinket = gear.get("trinket") or {}
+    if trinket.get("name"):
+        line += get_text("battle.trinket_suffix", trinket=trinket["name"])
+    return line
 
 
 def _battle_phase_line(battle: dict[str, Any]) -> str:
@@ -721,14 +847,17 @@ def _render_stats_block(battle: dict[str, Any]) -> str:
     rounds = int(battle.get("round", 0) or 0)
     tier_labels = get_text_mapping("battle.tier_labels")
     tier = enemy.get("tier", "common")
+    enemy_hp = max(0, int(battle.get("enemy_hp", enemy.get("hp") or 40)))
     # .strip(): YAML-блок '| сохраняет перевод строки в конце — для раскладки
     # отчёта пустые строки между секциями добавляет код.
     return get_text(
         "battle.stats_block",
         enemy=enemy.get("name", "?"),
         tier=tier_labels.get(tier, tier),
-        hits=battle.get("hits", 0),
-        win_hits=enemy.get("win_hits", 1),
+        enemy_hp=enemy_hp,
+        enemy_max=int(enemy.get("hp") or 40),
+        dealt=int(battle.get("dmg_dealt", 0)),
+        crits=int(battle.get("crits", 0)),
         dmg=battle.get("dmg_taken", 0),
         rounds=rounds,
         rounds_word=_ru_plural(rounds, "раунд", "раунда", "раундов"),
@@ -769,9 +898,12 @@ def _battle_message_text(battle: dict[str, Any]) -> str:
 
     lines.append(get_text(
         "battle.params_line",
-        win_hits=enemy.get("win_hits", 1),
+        enemy_hp=max(0, int(battle.get("enemy_hp", (enemy.get("hp") or 40)))),
         dmg=enemy.get("dmg_per_hit", 25),
     ))
+    gear_line = _gear_line(battle)
+    if gear_line:
+        lines.append(gear_line)
     lines.append(_battle_status(battle))
     lines.append("")
     lines.append(_battle_phase_line(battle))
@@ -846,6 +978,18 @@ def _victory_report(battle: dict[str, Any], rewards: dict[str, Any]) -> str:
             lines.append(get_text("battle.berserk_drop_line", pet=rewards["pet_name"]))
         if rewards.get("pet_pool_save"):
             lines.append(get_text("battle.scavenger_save_line", pet=rewards["pet_name"]))
+    if rewards.get("trinket_loot"):
+        lines.append(get_text(
+            "battle.trinket_loot_line",
+            trinket=rewards["trinket_loot"],
+            item=rewards.get("trinket_loot_item") or "?",
+        ))
+    if rewards.get("dig_loot_item"):
+        lines.append(get_text(
+            "battle.dig_loot_line",
+            weapon=rewards.get("weapon_name") or "🪏 Лопата",
+            item=rewards["dig_loot_item"],
+        ))
     if rewards.get("pet_levelled"):
         lines.append(get_text("pets.level_up", **rewards["pet_levelled"]))
     if rewards.get("leveled_up"):
@@ -876,6 +1020,12 @@ def _defeat_report(battle: dict[str, Any], rewards: dict[str, Any]) -> str:
         ))
         if rewards.get("pet_greedy_save") and rewards.get("items"):
             lines.append(get_text("battle.greedy_save_line", pet=rewards["pet_name"]))
+    if rewards.get("trinket_keep"):
+        lines.append(get_text(
+            "battle.trinket_keep_line",
+            trinket=rewards["trinket_keep"],
+            item=rewards.get("trinket_keep_item") or "?",
+        ))
     if rewards.get("pet_levelled"):
         lines.append(get_text("pets.level_up", **rewards["pet_levelled"]))
     lines.append(get_text("battle.defeat_end"))

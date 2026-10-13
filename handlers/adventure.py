@@ -768,6 +768,7 @@ def _ensure_player_defaults(player: dict[str, Any]) -> None:
     player.setdefault("wins", 0)
     player.setdefault("active_expedition", None)
     player.setdefault("active_battle", None)
+    player.setdefault("equipment", {})
     player.setdefault("pet", None)
 
 

@@ -25,9 +25,14 @@ zone_block_names:
 # Боевой разговор: ОДНО сообщение на весь бой — описание врага держится,
 # текущая обстановка (статус/фаза/арт/подсказки) дописывается внизу в коде.
 message: "⚔️ <b>{username} против {enemy}</b>"
-params_line: "🎯 Победа: {win_hits} попаданий • 💥 Урон за неверный блок: {dmg}"
+params_line: "❤️ Враг: <b>{enemy_hp}</b> HP · 💥 Цена пропущенного блока: {dmg}"
 
-status: "🎯 Попаданий: {hits}/{win_hits} • 💥 Получено урона: {dmg}"
+gear_line: "🗡 Оружие: {weapon} · 🛡 Броня: {armor}"
+trinket_suffix: " · 🎪 {trinket}"
+empty_weapon: "нихуя"
+no_armor: "нихуя"
+
+status: "❤️ Враг: <b>{enemy_hp}</b>/{enemy_max} HP · 💥 Получено: {dmg}"
 phase_attack: "🗡 <b>Раунд {round}</b> — выбери зону атаки (⏱ 10 сек):"
 phase_defense: "🛡 <b>Раунд {round}</b> — выбери зону блока (⏱ 10 сек):"
 
@@ -52,12 +57,15 @@ reward_item: "🎒 Добыча: {item} x{count}"
 reward_pet_xp: "🦀 {pet} в деле: +{xp} XP напарнику"
 berserk_drop_line: "🦀 {pet} клацает клешнями столь грозно, что дроп щедрее обычного."
 scavenger_save_line: "🦀 {pet} добегает вперёд и докидывает свой бросок — без него руки были бы пустыми."
+trinket_loot_line: "🎪 {trinket} никого не спрашивая уносит {item}."
 
 # Defeat report
 defeat_title: "💀 <b>{username}</b> — ГНОМ ПОВЕРЖЕН!"
 defeat_loot: "🎒 Обронил по дороге: {item}"
 defeat_pet_xp: "🦀 {pet} тащит побитого гнома в лагерь: +{xp} XP напарнику"
 greedy_save_line: "🦀 Не победа, но выручка: {pet} собрал то, что успел."
+trinket_keep_line: "🧿 {trinket} придержал часть вещей: {item} не забыто."
+dig_loot_line: "🪏 {weapon} увлечённо покопала на месте боя: {item}!"
 defeat_end: "🏃 Экспедиция прервана досрочно, без опыта. Гном еле дополз домой (1 HP)."
 
 # Общий блок итогов для обоих отчётов
@@ -65,7 +73,8 @@ stats_block: |
   🗡 Итоги боя:
 
   🎭 Враг: {enemy} [{tier}]
-  🎯 Попаданий: {hits}/{win_hits}
+  ❤️ Осталось врагу: {enemy_hp} HP (из {enemy_max})
+  ⚔️ Нанесено урона: {dealt} ({crits} критов)
   💥 Получено урона: {dmg} HP
   📓 Длительность: {rounds} {rounds_word}
 journal_header: "📓 Хроника боя:"

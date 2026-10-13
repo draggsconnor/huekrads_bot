@@ -99,5 +99,23 @@
     "ancestors_pepper": {"name": "🌶️ Перец Предков", "description": "Один укус — и гном видит предков.", "heal_hp": 100},
     "rotten_melon": {"name": "🍈 Гнилая дыня", "description": "Пахнет победой и поражением сразу.", "heal_hp": 100},
     "resin_apple": {"name": "🍎 Смоляное яблоко", "description": "Выросло на смоле Барона. Липкое.", "heal_hp": 25}
+  },
+  "gear": {
+    "wood_axe": {"name": "🪓 Топорик дровосека", "slot": "weapon", "dmg": 35, "crit_chance": 0.10, "description": "Вырублен там же, где похоронен."},
+    "steel_axe": {"name": "🪓 Стальной топор", "slot": "weapon", "dmg": 40, "crit_chance": 0.20, "description": "Слушает владельца. Больше никого."},
+    "dragon_axe": {"name": "🪓 Драконий топор", "slot": "weapon", "dmg": 50, "crit_chance": 0.30, "description": "Испаряет вражеские аргументы."},
+    "prospector_pick": {"name": "⛏ Кайло искателей", "slot": "weapon", "dmg": 30, "loc_bonus": {"abandoned_mine": 1.5}, "description": "В шахте превращается в национальный продукт."},
+    "digger_shovel": {"name": "🪏 Лопата удачника", "slot": "weapon", "dmg": 25, "dig_loot": 0.30, "description": "Копала бы и без боя, но бой — удобный повод."},
+    "resin_cap": {"name": "🧢 Смоляная шапка", "slot": "head", "zone_guard": 5, "description": "Липкая, зато по-баронски дарит вторые шансы."},
+    "stone_cap": {"name": "🪖 Каменная шапка", "slot": "head", "zone_guard": 10, "description": "Мысли держит при себе."},
+    "dragon_cap": {"name": "🧢 Драконья шапка", "slot": "head", "zone_guard": 15, "description": "Под ней не слышно воплей."},
+    "resin_shirt": {"name": "👕 Смоляная рубаха", "slot": "body", "zone_guard": 5, "description": "Стильная жижа."},
+    "stone_shirt": {"name": "🦺 Каменная рубаха", "slot": "body", "zone_guard": 10, "description": "Дышится туго, живётся долго."},
+    "dragon_shirt": {"name": "🐉 Драконья рубаха", "slot": "body", "zone_guard": 15, "description": "Чешуя дракона, сострижена по роскошной технологии."},
+    "resin_pants": {"name": "👖 Смоляные портки", "slot": "dick", "zone_guard": 5, "description": "Прилипают к делу."},
+    "stone_pants": {"name": "👖 Каменные портки", "slot": "dick", "zone_guard": 10, "description": "Абсолютно неподвижная система."},
+    "dragon_pants": {"name": "🩳 Драконьи портки", "slot": "dick", "zone_guard": 15, "description": "Огнестойкие. Проверено."},
+    "trinket_curio": {"name": "🎪 Уникальный тринкет", "slot": "trinket", "loot_toss": 0.25, "description": "Кто владеет тринкетом, тот владеет чужим."},
+    "amulet_hamster": {"name": "🧿 Оберег хомяка", "slot": "trinket", "defeat_keep": 0.40, "description": "Заначка за щекой имеется. Всегда."}
   }
 }

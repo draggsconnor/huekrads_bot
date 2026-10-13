@@ -68,10 +68,10 @@ LOCS = {
 
 MOBS = {
     "battle_defaults": {
-        "common": {"win_hits": 1, "dmg_per_hit": 25},
-        "uncommon": {"win_hits": 2, "dmg_per_hit": 40},
-        "rare": {"win_hits": 2, "dmg_per_hit": 55},
-        "boss": {"win_hits": 3, "dmg_per_hit": 60},
+        "common": {"hp": 40, "dmg_per_hit": 25},
+        "uncommon": {"hp": 60, "dmg_per_hit": 40},
+        "rare": {"hp": 80, "dmg_per_hit": 55},
+        "boss": {"hp": 100, "dmg_per_hit": 60},
     },
     "specific_mobs": {
         "test_loc": [
@@ -81,7 +81,7 @@ MOBS = {
                 "name": "Inline Куст",
                 "encounter_chance": 1.0,
                 "tier": "common",
-                "battle": {"win_hits": 1, "dmg_per_hit": 25},
+                "battle": {"hp": 40, "dmg_per_hit": 25},
                 "description": "inline desc",
             }
         ]
@@ -152,12 +152,13 @@ def _battle(**overrides):
         "enemy": {
             "name": "Куст",
             "tier": "common",
-            "win_hits": 1,
+            "hp": 40,
             "dmg_per_hit": 25,
             "base_reward": 0,
             "loot": [],
             "pool_items": [],
         },
+        "enemy_hp": 40,
         "round": 1,
         "phase": "defense",
         "enemy_attack": "head",
@@ -167,12 +168,17 @@ def _battle(**overrides):
         "auto_attack": False,
         "auto_block": False,
         "phase_deadline": None,
-        "hits": 0,
         "dmg_taken": 0,
+        "dmg_dealt": 0,
+        "crits": 0,
         "journal": [],
+        "gear": {},
         "message_id": None,
     }
     state.update(overrides)
+    # enemy_hp всегда согласован с врагом (если тест не задал явно другие бега).
+    if "enemy_hp" not in overrides:
+        state["enemy_hp"] = int(state["enemy"].get("hp", 40))
     return state
 
 
@@ -202,14 +208,14 @@ class TestBuildBattleEnemy:
     def test_boss_selected_with_battle_params(self, tmp_path, monkeypatch):
         locations = json.loads(json.dumps(LOCS))
         locations["test_loc"]["bosses"][0]["encounter_chance"] = 1.0
-        locations["test_loc"]["bosses"][0]["battle"] = {"win_hits": 2, "dmg_per_hit": 50}
+        locations["test_loc"]["bosses"][0]["battle"] = {"hp": 120, "dmg_per_hit": 50}
         _setup_paths(tmp_path, monkeypatch, locations=locations)
         monkeypatch.setattr(battle, "random", FakeRandom(0.0))
 
         enemy = battle.build_battle_enemy("test_loc")
         assert enemy["tier"] == "boss"
         assert enemy["name"] == "👑 Тестовый Босс"
-        assert enemy["win_hits"] == 2
+        assert enemy["hp"] == 120
         assert enemy["dmg_per_hit"] == 50
         assert enemy["loot"][0]["item_id"] == "boss_trophy"
 
@@ -221,7 +227,7 @@ class TestBuildBattleEnemy:
         # Имя берётся из adventure.yaml, а не из инлайн-поля моба
         assert enemy["name"] == "🌳Куст с предъявами"
         assert enemy["tier"] == "common"
-        assert enemy["win_hits"] == 1
+        assert enemy["hp"] == 40
         assert enemy["dmg_per_hit"] == 25
         assert enemy["pool_items"] == ["herb", "stone"]
 
@@ -234,7 +240,7 @@ class TestBuildBattleEnemy:
                 "name": "Inline Слуга",
                 "encounter_chance": 1.0,
                 "tier": "uncommon",
-                "battle": {"win_hits": 2, "dmg_per_hit": 35},
+                "battle": {"hp": 70, "dmg_per_hit": 35},
                 "description": "inline desc",
             },
         ]
@@ -249,7 +255,7 @@ class TestBuildBattleEnemy:
         assert "Барона" in enemy["desc"]
         assert "<b>Тактика:</b>" in enemy["desc"]
         assert enemy["tier"] == "uncommon"
-        assert enemy["win_hits"] == 2
+        assert enemy["hp"] == 70
         assert enemy["dmg_per_hit"] == 35
 
     def test_generated_mob_by_rarity(self, tmp_path, monkeypatch):
@@ -261,7 +267,7 @@ class TestBuildBattleEnemy:
         enemy = battle.build_battle_enemy("test_loc")
         assert enemy["tier"] == "uncommon"
         assert enemy["name"] == "Тёмный эльф"
-        assert enemy["win_hits"] == 2
+        assert enemy["hp"] == 60
         assert enemy["dmg_per_hit"] == 40
 
     def test_abandoned_mine_roster(self, tmp_path, monkeypatch):
@@ -280,8 +286,8 @@ class TestBuildBattleEnemy:
         enemy = battle.build_battle_enemy("abandoned_mine")
         assert enemy["id"] == "huekrad_ghost"
         assert enemy["name"] == "👻 Призрак хуекрада"
-        assert enemy["tier"] == "common"          # 1 попадание / 25 урона
-        assert enemy["win_hits"] == 1
+        assert enemy["tier"] == "common"          # HP 40 / 25 урона за пропуск
+        assert enemy["hp"] == 40
         assert enemy["dmg_per_hit"] == 25
         assert enemy["desc"]                      # лорное описание подтянулось
 
@@ -332,25 +338,34 @@ class TestResolveRound:
         b = _battle()
         b["player_attack"] = "head"   # != enemy_block "body" -> попадание
         b["player_block"] = "head"    # == enemy_attack "head" -> блок
-        with_block = b["player_block"]
         outcome = battle._resolve_round(b, {"hp": 200})
-        assert outcome == "victory"   # win_hits=1
-        assert b["hits"] == 1
+        assert outcome == "continue"  # у куста 40 HP, голыми руками по 20
+        assert b["dmg_dealt"] == 20   # «нихуя» в руках: базовый урон
+        assert b["enemy_hp"] == 20
         assert b["dmg_taken"] == 0
-        # Победный хит гасит ответный удар
-        assert b["journal"][-1]["blocked"] is None
+        assert b["journal"][-1]["blocked"] is True
+
+    def test_kill_at_zero_enemy_hp(self):
+        enemy = {"name": "Кустик", "tier": "common", "hp": 40, "dmg_per_hit": 25,
+                 "base_reward": 0, "loot": [], "pool_items": []}
+        b = _battle(enemy=enemy)
+        b["enemy_hp"] = 10
+        b["player_attack"] = "head"   # != enemy_block -> смертельное попадание
+        b["player_block"] = "body"    # неверный блок, но враг уже мёртв
+        assert battle._resolve_round(b, {"hp": 10}) == "victory"
+        assert b["dmg_taken"] == 0    # победный хит гасит ответку
 
     def test_win_hit_cancels_counter(self):
-        enemy = {"name": "Босс", "tier": "boss", "win_hits": 2, "dmg_per_hit": 60,
+        enemy = {"name": "Босс", "tier": "boss", "hp": 20, "dmg_per_hit": 60,
                  "base_reward": 25, "loot": [], "pool_items": []}
-        b = _battle(enemy=enemy, hits=1)
+        b = _battle(enemy=enemy)
         b["player_attack"] = "head"   # != enemy_block -> победное попадание
         b["player_block"] = "body"    # неверный блок, но ответки не будет
         assert battle._resolve_round(b, {"hp": 10}) == "victory"
         assert b["dmg_taken"] == 0
 
     def test_wrong_block_deals_damage(self):
-        enemy = {"name": "Эльф", "tier": "uncommon", "win_hits": 2, "dmg_per_hit": 40,
+        enemy = {"name": "Эльф", "tier": "uncommon", "hp": 60, "dmg_per_hit": 40,
                  "base_reward": 0, "loot": [], "pool_items": []}
         b = _battle(enemy=enemy)
         b["player_attack"] = "body"   # == enemy_block -> промах
@@ -358,10 +373,11 @@ class TestResolveRound:
         outcome = battle._resolve_round(b, {"hp": 200})
         assert outcome == "continue"
         assert b["dmg_taken"] == 40
-        assert b["hits"] == 0
+        assert b["enemy_hp"] == 60    # промах — врагу не нанесли
+        assert b["dmg_dealt"] == 0
 
     def test_defeat_when_damage_reaches_hp(self):
-        enemy = {"name": "Босс", "tier": "boss", "win_hits": 5, "dmg_per_hit": 60,
+        enemy = {"name": "Босс", "tier": "boss", "hp": 200, "dmg_per_hit": 60,
                  "base_reward": 0, "loot": [], "pool_items": []}
         b = _battle(enemy=enemy, dmg_taken=150)
         b["player_attack"] = "body"   # промах
@@ -389,15 +405,21 @@ class TestRecordBattleChoice:
         bid = state["battle_id"]
         assert state["enemy"]["name"] == "🌳Куст с предъявами"
         assert state["phase"] == "attack"
+        assert state["enemy_hp"] == 40   # у куста HP, а не число попаданий
+        assert state["gear"] == {}       # шмоток нет — гном дерётся «нихуя» (20 урона)
 
-        # Атака: "body" != enemy_block "head" -> попадание (win_hits=1)
-        action = battle.record_battle_choice(123, bid, "attack", "body")
-        assert action["event"] == "phase"
-        assert action["battle"]["phase"] == "defense"
-
-        # Блок: победное попадание уже в кармане — раунд решается сразу
-        action = battle.record_battle_choice(123, bid, "block", "head")
+        # У куста 40 HP, голыми руками по 20 -> два победных раунда.
+        for _ in range(2):
+            # Атака: "body" != enemy_block "head" -> попадание
+            action = battle.record_battle_choice(123, bid, "attack", "body")
+            assert action["event"] == "phase"
+            assert action["battle"]["phase"] == "defense"
+            # Блок: раунд решается сразу
+            action = battle.record_battle_choice(123, bid, "block", "head")
+            if action["event"] == "victory":
+                break
         assert action["event"] == "victory"
+        assert action["battle"]["enemy_hp"] == 0
 
         stored = _read_player(data_path)
         assert stored["active_battle"] is None
@@ -553,20 +575,21 @@ class TestAdvanceBattle:
 
     def test_auto_resolves_round_on_defense_deadline(self, tmp_path, monkeypatch):
         monkeypatch.setattr(battle, "random", FakeRandom(0.0))
-        enemy = {"name": "Эльф", "tier": "uncommon", "win_hits": 2, "dmg_per_hit": 40,
+        enemy = {"name": "Эльф", "tier": "uncommon", "hp": 60, "dmg_per_hit": 40,
                  "base_reward": 0, "loot": [], "pool_items": []}
         state = _battle(enemy=enemy)
-        state["player_attack"] = "head"  # != enemy_block "body" -> попадание 1/2
+        state["player_attack"] = "head"  # != enemy_block "body" -> попадание (20 из 60 HP)
         state["phase_deadline"] = (
             datetime.now(timezone.utc) - timedelta(seconds=5)
         ).isoformat()
         data_path = self._prepare(tmp_path, monkeypatch, state)
 
         action = battle.advance_battle(123)
-        assert action["event"] == "phase"  # продолжается: 1/2 попаданий
+        assert action["event"] == "phase"  # враг жив (40 HP осталось)
         stored = _read_player(data_path)
         nb = stored["active_battle"]
-        assert nb["hits"] == 1
+        assert nb["enemy_hp"] == 40
+        assert nb["dmg_dealt"] == 20
         assert nb["dmg_taken"] == 0
         # Авторазметка зафиксирована в журнале раунда 1 (в новом раунде флаги сброшены)
         assert nb["journal"][0]["auto"] is True
@@ -606,7 +629,7 @@ class TestApplyBattleVictoryLoot:
         player = self._player(data_path)
 
         state = _battle(enemy={
-            "name": "Слуга", "tier": "uncommon", "win_hits": 2, "dmg_per_hit": 35,
+            "name": "Слуга", "tier": "uncommon", "hp": 60, "dmg_per_hit": 35,
             "base_reward": 0,
             "loot": [{"item_id": "resin_apple", "name": "🍎 Смоляное яблоко",
                       "quantity_min": 1, "quantity_max": 1, "chance": 1.0}],
@@ -626,7 +649,7 @@ class TestApplyBattleVictoryLoot:
         player = self._player(data_path)
 
         state = _battle(enemy={
-            "name": "Крыс", "tier": "common", "win_hits": 1, "dmg_per_hit": 25,
+            "name": "Крыс", "tier": "common", "hp": 40, "dmg_per_hit": 25,
             "base_reward": 0, "loot": [], "pool_items": ["herb"],
         })
         battle._apply_battle_victory(player, state)
@@ -695,6 +718,171 @@ class TestBattleReportCleanup:
         assert entries == [(120, 888)]
 
 
+class TestGearV2:
+    """HP-система: оружие даёт урон, броня гасит цену зоны, талисман ворует."""
+
+    def test_gear_snapshot_resolves_equipment(self, tmp_path, monkeypatch):
+        pool = {
+            "items": {"herb": {"name": "🌿 Трава"}},
+            "gear": {
+                "steel_axe": {"name": "🪓 Стальной топор", "slot": "weapon",
+                              "dmg": 40, "crit_chance": 0.2},
+            },
+        }
+        _setup_paths(tmp_path, monkeypatch, pool=pool)
+        player = {"hp": 200, "max_hp": 200, "inventory": [],
+                  "equipment": {"weapon": "steel_axe", "head": "no_such_item"}}
+        gear = battle.build_gear_snapshot(player)
+        assert gear["weapon"]["name"] == "🪓 Стальной топор"
+        assert "head" not in gear   # несуществующий id игнорится
+
+    def test_weapon_damage_and_crit(self):
+        enemy = {"name": "Куст", "tier": "common", "hp": 40, "dmg_per_hit": 25,
+                 "base_reward": 0, "loot": [], "pool_items": []}
+        b = _battle(enemy=enemy, gear={"weapon": {"name": "🪓 Топор", "dmg": 30,
+                                                     "crit_chance": 0.5}})
+        b["player_attack"] = "head"   # попадание
+        b["player_block"] = "head"    # блок закрыт
+
+        import unittest.mock as mock
+        with mock.patch("handlers.battle.random.random", return_value=0.0):
+            outcome = battle._resolve_round(b, {"hp": 200})
+
+        assert outcome == "victory"            # крит удвоил 30 -> 60 >= 40 HP
+        assert b["dmg_dealt"] == 60
+        assert b["crits"] == 1
+        assert b["journal"][-1]["crit"] is True
+
+    def test_weapon_loc_bonus_in_mine(self):
+        b = _battle(gear={"weapon": {"name": "⛏ Кирка", "dmg": 30,
+                                       "loc_bonus": {"abandoned_mine": 1.5}}})
+        b["location_id"] = "abandoned_mine"
+        dmg, crit = battle._weapon_damage(b["gear"], b["location_id"])
+        assert dmg == 45 and crit is False
+
+    def test_bare_hands_damage(self):
+        dmg, crit = battle._weapon_damage({}, None)
+        assert dmg == battle.BARE_HANDS_DMG and crit is False   # «нихуя»
+
+    def test_zone_guard_reduces_damage(self):
+        enemy = {"name": "Гопник", "tier": "common", "hp": 40, "dmg_per_hit": 25,
+                 "base_reward": 0, "loot": [], "pool_items": []}
+        b = _battle(enemy=enemy, gear={"head": {"name": "🧢 Шапка", "zone_guard": 10}})
+        b["player_attack"] = "body"   # промах
+        b["player_block"] = "body"    # враг бьёт "head" — шапка принимает
+        outcome = battle._resolve_round(b, {"hp": 200})
+        assert outcome == "continue"
+        assert b["dmg_taken"] == 15   # 25 - 10 шапки
+        assert b["journal"][-1]["guard"] == 10
+
+    def test_zone_guard_not_full_absorption(self):
+        # Урон 25, шапка-титан 40: броня не обнуляет удар, остаётся 1.
+        b = _battle(gear={"head": {"name": "🧢", "zone_guard": 40}})
+        dmg, crit = None, None
+        guard = battle._zone_guard(b["gear"], "head")
+        assert guard == 40
+        assert min(guard, 25 - 1) == 24  # кап от полного поглощения
+
+    def test_trinket_loot_toss(self, tmp_path, monkeypatch):
+        _setup_paths(tmp_path, monkeypatch)
+        # 0.9: пул мимо; краба нет; 0.5: тринкет 40% попал (0.5 >= 0.4 -> НЕ попал)
+        # -> возьмём 0.2: попал.
+        monkeypatch.setattr(battle, "random", FakeRandom(seq=[0.9, 0.2]))
+        player = {"hp": 200, "max_hp": 200, "xp": 0, "inventory": []}
+        enemy = {"name": "Крыс", "tier": "common", "hp": 40, "dmg_per_hit": 25,
+                 "base_reward": 0, "loot": [], "pool_items": ["herb"]}
+        state = _battle(enemy=enemy, gear={
+            "trinket": {"name": "🎪 Тринкет", "loot_toss": 0.4},
+        })
+
+        rewards = battle._apply_battle_victory(player, state)
+        assert [i["name"] for i in player["inventory"]] == ["🌿 Трава"]
+        assert rewards["trinket_loot"] == "🎪 Тринкет"
+        assert rewards["trinket_loot_item"] == "🌿 Трава"
+
+    def test_gear_line_shows_nihuya_when_empty(self):
+        state = _battle()
+        line = battle._gear_line(state)
+        assert "Оружие: нихуя" in line
+        assert "Броня: нихуя" in line
+
+    def test_gear_line_shows_names(self):
+        state = _battle(gear={
+            "weapon": {"name": "🪓 Стальной топор"},
+            "dick": {"name": "👖 Портки"},
+            "trinket": {"name": "🎪 Тринкет"},
+        })
+        line = battle._gear_line(state)
+        assert "🪓 Стальной топор" in line
+        assert "👖 Портки" in line
+        assert "🎪 Тринкет" in line
+
+    def test_start_battle_snapshots_gear(self, tmp_path, monkeypatch):
+        """try_start_battle копирует экипировку игрока в снапшот боя."""
+        pool = {
+            "items": {"herb": {"name": "🌿 Трава"}},
+            "gear": {
+                "steel_axe": {"name": "🪓 Стальной топор", "slot": "weapon",
+                              "dmg": 40, "crit_chance": 0.2},
+            },
+        }
+        _setup_paths(tmp_path, monkeypatch, pool=pool)
+        data_path = tmp_path / "player_data.json"
+        _write_player(data_path, {
+            "hp": 200, "max_hp": 200, "lvl": 1, "xp": 0, "inventory": [],
+            "active_expedition": _expedition(),
+            "equipment": {"weapon": "steel_axe"},
+        })
+
+        state = battle.try_start_battle(123)
+        assert state["gear"]["weapon"]["name"] == "🪓 Стальной топор"
+        assert state["gear"]["weapon"]["dmg"] == 40
+
+    def test_shovel_digs_loot_after_victory(self, tmp_path, monkeypatch):
+        """🪏 Лопата: шанс раскопать ресурс локации после победы."""
+        _setup_paths(tmp_path, monkeypatch)
+        monkeypatch.setattr(battle, "random", FakeRandom(0.2))  # 0.2 < 30% -> копает
+        player = {"hp": 200, "max_hp": 200, "xp": 0, "inventory": []}
+        enemy = {"name": "Крыс", "tier": "common", "hp": 40, "dmg_per_hit": 25,
+                 "base_reward": 0, "loot": [], "pool_items": []}
+        state = _battle(enemy=enemy, gear={
+            "weapon": {"name": "🪏 Лопата удачника", "dmg": 25, "dig_loot": 0.30},
+        })
+
+        rewards = battle._apply_battle_victory(player, state)
+        assert [i["name"] for i in player["inventory"]] == ["🌿 Хвоя"]
+        assert rewards["dig_loot_item"] == "🌿 Хвоя"
+
+    def test_amulet_keeps_loot_on_defeat(self, tmp_path, monkeypatch):
+        """🧿 Оберег: шанс придержать ресурс, когда гном повержен."""
+        _setup_paths(tmp_path, monkeypatch)
+        # 0.9: базовых 25% нет; 0.2: оберге 40% попал.
+        monkeypatch.setattr(battle, "random", FakeRandom(seq=[0.9, 0.2]))
+        player = {"hp": 200, "max_hp": 200, "xp": 0, "inventory": []}
+        state = _battle(gear={"trinket": {"name": "🧿 Оберег хомяка", "defeat_keep": 0.4}})
+
+        rewards = battle._apply_battle_defeat(player, state)
+        assert [i["name"] for i in player["inventory"]] == ["🌿 Хвоя"]
+        assert rewards["trinket_keep"] == "🧿 Оберег хомяка"
+        assert rewards["trinket_keep_item"] == "🌿 Хвоя"
+
+        text = battle._defeat_report(state, rewards)
+        assert "🧿 Оберег хомяка придержал часть вещей" in text
+
+    def test_shovel_dig_report_line(self, tmp_path, monkeypatch):
+        _setup_paths(tmp_path, monkeypatch)
+        monkeypatch.setattr(battle, "random", FakeRandom(0.2))
+        player = {"hp": 200, "max_hp": 200, "xp": 0, "inventory": []}
+        enemy = {"name": "Крыс", "tier": "common", "hp": 40, "dmg_per_hit": 25,
+                 "base_reward": 0, "loot": [], "pool_items": []}
+        state = _battle(enemy=enemy, gear={
+            "weapon": {"name": "🪏 Лопата удачника", "dmg": 25, "dig_loot": 0.30},
+        })
+        rewards = battle._apply_battle_victory(player, state)
+        text = battle._victory_report(state, rewards)
+        assert "🪏 Лопата удачника увлечённо покопала" in text
+
+
 class TestPetPerks:
     """Перки питомцев в боевой системе"""
 
@@ -728,12 +916,13 @@ class TestPetPerks:
         # 0.9: пул не сработал; 0.3: докидка (royal 0.4) сработала.
         monkeypatch.setattr(battle, "random", FakeRandom(seq=[0.9, 0.3]))
         player = {"hp": 200, "max_hp": 200, "xp": 0, "inventory": []}
-        enemy = {"name": "Крыс", "tier": "common", "win_hits": 1, "dmg_per_hit": 25,
+        enemy = {"name": "Крыс", "tier": "common", "hp": 40, "dmg_per_hit": 25,
                  "base_reward": 0, "loot": [], "pool_items": ["herb"]}
         state = _battle(enemy=enemy,
                         pet={"name": "👑 Королевский хуекраб", "perks": {"scavenger": 0.4}})
+        state["enemy_hp"] = 10  # куст на ладанке
         state["player_attack"] = "head"
-        state["player_block"] = "head"  # враг держит "head" -> добивающее попадание 1/1
+        state["player_block"] = "head"  # враг держит "head" -> смертельное попадание 40>10
 
         assert battle._resolve_round(state, player) == "victory"
         rewards = battle._settle_battle(player, state, "victory")
@@ -745,7 +934,7 @@ class TestPetPerks:
         _setup_paths(tmp_path, monkeypatch)
         monkeypatch.setattr(battle, "random", FakeRandom(0.6))  # 0.6: базовый 50% мимо, ярость 75% попала
         player = {"hp": 200, "max_hp": 200, "xp": 0, "inventory": []}
-        enemy = {"name": "Крыс", "tier": "common", "win_hits": 1, "dmg_per_hit": 25,
+        enemy = {"name": "Крыс", "tier": "common", "hp": 40, "dmg_per_hit": 25,
                  "base_reward": 0, "loot": [], "pool_items": ["herb"]}
         state = _battle(enemy=enemy, pet={"name": "🦀 Краб", "perks": {"berserk": 0.75}})
 
@@ -767,9 +956,10 @@ class TestPetPerks:
         # 0.9: пул мимо; 0.2: докидка Лутовика (25%) сработала.
         monkeypatch.setattr(battle, "random", FakeRandom(seq=[0.9, 0.2]))
         player = {"hp": 200, "max_hp": 200, "xp": 0, "inventory": []}
-        enemy = {"name": "Крыс", "tier": "common", "win_hits": 1, "dmg_per_hit": 25,
+        enemy = {"name": "Крыс", "tier": "common", "hp": 40, "dmg_per_hit": 25,
                  "base_reward": 0, "loot": [], "pool_items": ["herb"]}
         state = _battle(enemy=enemy, pet={"name": "🦀 Лутовик", "perks": {"scavenger": 0.25}})
+        state["enemy_hp"] = 10
         state["player_attack"] = "head"
         state["player_block"] = "head"
 
@@ -784,7 +974,7 @@ class TestPetPerks:
         _setup_paths(tmp_path, monkeypatch)
         monkeypatch.setattr(battle, "random", FakeRandom(0.6))  # базовая 50% мимо, ярость 75% попала
         player = {"hp": 200, "max_hp": 200, "xp": 0, "inventory": []}
-        enemy = {"name": "Крыс", "tier": "common", "win_hits": 1, "dmg_per_hit": 25,
+        enemy = {"name": "Крыс", "tier": "common", "hp": 40, "dmg_per_hit": 25,
                  "base_reward": 0, "loot": [], "pool_items": ["herb"]}
         state = _battle(enemy=enemy, pet={"name": "🦀 Берсерк", "perks": {"berserk": 0.75}})
 
@@ -841,11 +1031,12 @@ class TestPetXp:
             "pet": {"id": "piebald_crab", "name": "🦀 Пёстрый хуекраб",
                     "perks": {}, "level": 1, "xp": 45},
         }
-        state = _battle(enemy={"name": "Крыс", "tier": "common", "win_hits": 1,
+        state = _battle(enemy={"name": "Крыс", "tier": "common", "hp": 20,
                                "dmg_per_hit": 25, "base_reward": 0, "loot": [],
                                "pool_items": ["herb"]})
+        state["enemy_hp"] = 15
         state["player_attack"] = "head"
-        state["player_block"] = "head"  # враг держит "head" -> добивающее попадание
+        state["player_block"] = "head"  # стрелка 20 > 15 -> смертельное попадание
 
         assert battle._resolve_round(state, player) == "victory"
         rewards = battle._settle_battle(player, state, "victory")
@@ -943,8 +1134,7 @@ class TestBattleReports:
         assert text.count("tester") == 1  # юзернейм без дублирования
 
     def test_victory_report_contains_player(self):
-        state = _battle(username="tester", hits=1)
-        state["enemy"]["win_hits"] = 1
+        state = _battle(username="tester")
         state["journal"] = [
             {"round": 1, "attack": "body", "block": "head", "auto": False,
              "hit": True, "blocked": None, "dmg": 0}
@@ -958,8 +1148,7 @@ class TestBattleReports:
         assert "Куст" in text
 
     def test_victory_report_has_empty_line_between_sections(self):
-        state = _battle(username="tester", hits=1)
-        state["enemy"]["win_hits"] = 1
+        state = _battle(username="tester")
         state["journal"] = [
             {"round": 1, "attack": "body", "block": "head", "auto": False,
              "hit": True, "blocked": None, "dmg": 0}
