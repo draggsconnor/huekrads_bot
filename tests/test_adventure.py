@@ -489,6 +489,66 @@ class TestGnomeNaming:
         assert "reply_markup" not in second.await_args.kwargs
 
 
+class TestAdminGnomeName:
+    """Админские /admin_gnome_name и /admin_gnome_reset — CAS в обход."""
+
+    def _player_file(self, tmp_path):
+        data_path = tmp_path / "player_data.json"
+        with open(data_path, "w", encoding="utf-8") as f:
+            json.dump({"1001": {"hp": 200, "max_hp": 200, "lvl": 1,
+                                "display_name": "Когди Изобретательный",
+                                "display_named": True}}, f, ensure_ascii=False)
+        return data_path
+
+    async def _run(self, monkeypatch, fake_context, data_path, text, is_admin=True):
+        monkeypatch.setattr(adv, "PLAYER_DATA_PATH", str(data_path))
+        monkeypatch.setattr(adv, "is_admin", lambda uid: is_admin)
+        reply = AsyncMock(return_value=SimpleNamespace(chat_id=-42, message_id=900))
+        await adv.admin_gnome_command(
+            SimpleNamespace(
+                effective_user=SimpleNamespace(id=999),
+                effective_message=SimpleNamespace(chat_id=-42, message_id=901, text=text, reply_text=reply),
+            ),
+            SimpleNamespace(args=text.split()[1:], user_data={}, **{"job_queue": None, "bot": fake_context.bot}),
+        )
+        return reply
+
+    async def test_non_admin_denied(self, tmp_path, monkeypatch, fake_context):
+        data_path = self._player_file(tmp_path)
+        reply = await self._run(monkeypatch, fake_context, data_path,
+                                "/admin_gnome_name 1001 Новое", is_admin=False)
+        assert "админская" in reply.await_args.args[0]
+        stored = json.load(open(data_path, encoding="utf-8"))["1001"]
+        assert stored["display_name"] == "Когди Изобретательный"  # не тронули
+
+    async def test_admin_sets_name_bypassing_cas(self, tmp_path, monkeypatch, fake_context):
+        data_path = self._player_file(tmp_path)
+        await self._run(monkeypatch, fake_context, data_path, "/admin_gnome_name 1001 Когли Изобретательный")
+        stored = json.load(open(data_path, encoding="utf-8"))["1001"]
+        assert stored["display_name"] == "Когли Изобретательный"
+        assert stored["display_named"] is True
+
+    async def test_admin_resets_name(self, tmp_path, monkeypatch, fake_context):
+        data_path = self._player_file(tmp_path)
+        await self._run(monkeypatch, fake_context, data_path, "/admin_gnome_reset 1001")
+        stored = json.load(open(data_path, encoding="utf-8"))["1001"]
+        assert stored["display_name"] == ""
+        assert stored["display_named"] is False
+
+    async def test_admin_creates_defaults_and_sets(self, tmp_path, monkeypatch, fake_context):
+        data_path = tmp_path / "player_data.json"
+        data_path.write_text("{}", encoding="utf-8")
+        await self._run(monkeypatch, fake_context, data_path, "/admin_gnome_name 555 Байт Одперчата")
+        stored = json.load(open(data_path, encoding="utf-8"))["555"]
+        assert stored["display_name"] == "Байт Одперчата"
+        assert stored["display_named"] is True
+
+    async def test_usage_when_no_args(self, tmp_path, monkeypatch, fake_context):
+        data_path = self._player_file(tmp_path)
+        reply = await self._run(monkeypatch, fake_context, data_path, "/admin_gnome_reset")
+        assert "Формат" in reply.await_args.args[0]
+
+
 class TestLeadingEmoji:
     def test_does_not_duplicate_first_letter(self):
         # было: '🌲Охуенно тёмный лес'[:2] -> '🌲О' + 'Охуенно…' -> 'ООхуенно'

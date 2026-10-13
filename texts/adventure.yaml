@@ -350,6 +350,13 @@ name_usage: "⌨️ Используйте /adventure_name и напишите �
 not_your_button: "Это не твоя кнопка — твоё гномье имя ищет тебя через /adventure_name."
 named_display: "{name} ({username})"
 
+# Админские команды перезаписи имён (CAS в обход)
+admin_denied: "⚙️ Это админская команда."
+admin_name_usage: "⚙️ Формат: /admin_gnome_name &lt;user_id&gt; &lt;имя&gt; — принудительно задать гнома имя."
+admin_reset_usage: "⚙️ Формат: /admin_gnome_reset &lt;user_id&gt; — сбросить имя (гном снова безымянный)."
+admin_name_set: "⚙️ Гному {uid} установлено имя: <b>{name}</b>"
+admin_name_reset: "⚙️ Имя гнома {uid} сброшено."
+
 adventure_stats_title: "📊 <b>Статистика экспедиций</b>"
 adventure_stats_no_data: "Вы ещё не завершили ни одной экспедиции."
 adventure_stats_level: "⭐ Уровень: {level}"

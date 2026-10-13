@@ -24,6 +24,7 @@ from telegram.constants import ParseMode
 
 from handlers.utils import (
     DEFAULT_DELETE_DELAY,
+    is_admin,
     redirect_self_delete,
     schedule_self_delete,
 )
@@ -141,6 +142,76 @@ def set_gnome_name(user_id: int, raw: str) -> dict[str, Any]:
         player["display_named"] = True
         save_player_data(data)
     return {"event": "gnome_named", "name": safe_name}
+
+
+def _admin_rewrite_gnome_name(user_id: int, new_name: str | None) -> dict[str, Any]:
+    """Админская перезапись имени гнома: new_name задан — установить
+    (CAS в обход), None/" " — сбросить до безымянного.
+
+    Возвращает {"event": "set"/"reset", "name"} | {"event": "empty_name"}.
+    """
+    from html import escape
+
+    with _EXPEDITION_LOCK:
+        data = load_player_data()
+        player = data.get(_player_key(user_id))
+        if not isinstance(player, dict):
+            data[_player_key(user_id)] = {"hp": 200, "max_hp": 200, "lvl": 1}
+            player = data[_player_key(user_id)]
+        _ensure_player_defaults(player)
+
+        if new_name is None:
+            player["display_name"] = ""
+            player["display_named"] = False
+            save_player_data(data)
+            return {"event": "reset", "name": ""}
+
+        name = (new_name or "").strip()[:MAX_GNOME_NAME_LEN]
+        if not name:
+            return {"event": "empty_name"}
+        player["display_name"] = escape(name)
+        player["display_named"] = True
+        save_player_data(data)
+        return {"event": "set", "name": escape(name)}
+
+
+async def admin_gnome_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Админский контроль имён: /admin_gnome_name <uid> <имя> |
+    /admin_gnome_reset <uid>. Игроков хватает за горло их же именами."""
+    user = update.effective_user
+    if not user or not is_admin(user.id):
+        if update.effective_message:
+            message = await update.effective_message.reply_text(
+                _get_text("adventure.admin_denied")
+            )
+            await schedule_self_delete(context, message)
+        return
+
+    args = context.args or []
+    first_token = (update.effective_message.text or "").split()[0] if update.effective_message else ""
+    is_reset = "reset" in first_token
+
+    if not args or not args[0].lstrip("-").isdigit():
+        usage_key = "adventure.admin_reset_usage" if is_reset else "adventure.admin_name_usage"
+        message = await update.effective_message.reply_text(_get_text(usage_key))
+        await schedule_self_delete(context, update.effective_message)
+        await schedule_self_delete(context, message)
+        return
+
+    uid = int(args[0])
+    new_name = None if is_reset else " ".join(args[1:])
+    result = _admin_rewrite_gnome_name(uid, new_name)
+
+    if result.get("event") == "set":
+        text = _get_text("adventure.admin_name_set", uid=uid, name=result["name"])
+    elif result.get("event") == "reset":
+        text = _get_text("adventure.admin_name_reset", uid=uid)
+    else:
+        text = _get_text("adventure.admin_name_usage")
+
+    message = await update.effective_message.reply_text(text, parse_mode=ParseMode.HTML)
+    await schedule_self_delete(context, update.effective_message)
+    await schedule_self_delete(context, message)
 
 
 def get_player(user_id: int, pool: dict | None = None) -> dict[str, Any]:
