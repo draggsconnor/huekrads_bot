@@ -379,16 +379,16 @@ forge_stock_empty: "• Материалов нет вообще — иди фа
 forge_slot_unknown: "Такого раздела рецептов нет."
 
 # Категории рецептов (кнопки кузни)
-forge_cat_weapon: "⚙ РЕЦЕПТЫ ОРУЖИЯ"
+forge_cat_weapon: "⚔️ РЕЦЕПТЫ ОРУЖИЯ"
 forge_cat_dick: "👖 РЕЦЕПТЫ ПОРТКОВ"
-forge_cat_body: "👕 РЕЦЕПТЫ БРОНИ"
-forge_cat_head: "🧢 РЕЦЕПТЫ ШАПОК"
-forge_cat_trinket: "🎪 РЕЦЕПТЫ ТАЛИСМАНОВ"
-forge_cat_title_weapon: "⚙ <b>Рецепты оружия</b>"
+forge_cat_body: "🧥 РЕЦЕПТЫ БРОНИ"
+forge_cat_head: "🎩 РЕЦЕПТЫ ШАПОК"
+forge_cat_trinket: "🪬 РЕЦЕПТЫ ТАЛИСМАНОВ"
+forge_cat_title_weapon: "⚔️ <b>Рецепты оружия</b>"
 forge_cat_title_dick: "👖 <b>Рецепты портков</b>"
-forge_cat_title_body: "👕 <b>Рецепты брони</b>"
-forge_cat_title_head: "🧢 <b>Рецепты шапок</b>"
-forge_cat_title_trinket: "🎪 <b>Рецепты талисманов</b>"
+forge_cat_title_body: "🧥 <b>Рецепты брони</b>"
+forge_cat_title_head: "🎩 <b>Рецепты шапок</b>"
+forge_cat_title_trinket: "🪬 <b>Рецепты талисманов</b>"
 forge_back_to_forge: "← кузня"
 
 # /adventure_equipment — снряжение гнома
