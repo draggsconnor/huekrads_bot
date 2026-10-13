@@ -39,6 +39,9 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ADVENTURE_DIR = os.path.join(BASE_DIR, "data", "adventure")
 # Отбивка по итогу экспедиции живёт дольше остальных ответов — итоги прочитать успеть.
 EXPEDITION_RESULT_DELETE_DELAY = 120
+# /adventure (меню локаций + команда игрока) — тоже две минуты: выбор
+# локации с кнопками долго не застаивается.
+ADVENTURE_DELETE_DELAY = 120
 PERSIST_DIR = os.path.join(BASE_DIR, "persist")
 
 LOCATIONS_PATH = os.path.join(ADVENTURE_DIR, "locations.json")
@@ -448,9 +451,12 @@ async def adventure_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     """Entry point: /adventure — show available locations."""
     locations = load_locations()
     text = _get_text("adventure.welcome")
-    await update.effective_message.reply_text(
+    # Уборка: команда игрока и меню локаций живут две минуты.
+    await schedule_self_delete(context, update.effective_message, ADVENTURE_DELETE_DELAY)
+    message = await update.effective_message.reply_text(
         text, reply_markup=_locations_keyboard(locations), parse_mode='HTML'
     )
+    await schedule_self_delete(context, message, ADVENTURE_DELETE_DELAY)
 
 
 async def adventure_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

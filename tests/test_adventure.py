@@ -279,6 +279,24 @@ class TestExpeditionResultCleanup:
         assert entries == [(120, 101)]
 
 
+class TestAdventureCommandCleanup:
+    async def test_command_and_menu_deleted_after_2min(self, fake_context):
+        """/adventure: команда игрока и меню локаций живут 120 секунд."""
+        from handlers import utils
+
+        reply = AsyncMock(return_value=SimpleNamespace(chat_id=-42, message_id=600))
+        await adv.adventure_command(
+            SimpleNamespace(
+                effective_user=SimpleNamespace(id=123),
+                effective_message=SimpleNamespace(chat_id=-42, message_id=601, reply_text=reply),
+            ),
+            fake_context,
+        )
+        scheduled = [c for c in fake_context.job_queue.calls if c[0] is utils.self_delete_job]
+        entries = sorted((c[1], c[2]["data"]["message_id"]) for c in scheduled)
+        assert entries == [(120, 600), (120, 601)]
+
+
 class TestLeadingEmoji:
     def test_does_not_duplicate_first_letter(self):
         # было: '🌲Охуенно тёмный лес'[:2] -> '🌲О' + 'Охуенно…' -> 'ООхуенно'

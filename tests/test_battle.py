@@ -661,6 +661,40 @@ class FakeRandom:
         return a
 
 
+class TestBattleReportCleanup:
+    """Отчёт о бое (победа/поражение) удаляется через 2 минуты."""
+
+    async def test_edited_report_deleted_after_2min(self, fake_context):
+        from handlers import utils
+
+        state = _battle()
+        state["chat_id"] = -42
+        state["message_id"] = 777
+
+        await battle._send_battle_report(123, state, {"xp": 10, "items": []}, "victory", fake_context)
+
+        scheduled = [c for c in fake_context.job_queue.calls if c[0] is utils.self_delete_job]
+        entries = sorted((c[1], c[2]["data"]["message_id"]) for c in scheduled)
+        assert entries == [(120, 777)]
+
+    async def test_resent_report_deleted_after_2min(self, fake_context):
+        """Сообщение боя удалено игроком — отчёт уходит новым сообщением и чистится."""
+        from handlers import utils
+
+        state = _battle()
+        state["chat_id"] = -42
+        state["message_id"] = None
+        fake_context.bot.send_message = AsyncMock(
+            return_value=SimpleNamespace(message_id=888),
+        )
+
+        await battle._send_battle_report(123, state, {"xp": 10, "items": []}, "defeat", fake_context)
+
+        scheduled = [c for c in fake_context.job_queue.calls if c[0] is utils.self_delete_job]
+        entries = sorted((c[1], c[2]["data"]["message_id"]) for c in scheduled)
+        assert entries == [(120, 888)]
+
+
 class TestPetPerks:
     """Перки питомцев в боевой системе"""
 

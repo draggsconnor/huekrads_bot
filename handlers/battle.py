@@ -46,6 +46,7 @@ from handlers.adventure import (
     send_expedition_result,
 )
 from handlers.pets import pet_xp_for_next_level
+from handlers.utils import redirect_self_delete
 from text_resources import get_text, get_text_list, get_text_mapping
 
 logger = logging.getLogger(__name__)
@@ -53,6 +54,8 @@ logger = logging.getLogger(__name__)
 ZONES = ("head", "body", "dick")
 PHASE_SECONDS = 10
 JOURNAL_LIMIT = 20
+# Отчёт о победе/поражении (итоги боя) живёт две минуты, потом стирается.
+BATTLE_REPORT_DELETE_DELAY = 120
 
 TIER_XP = {"common": 10, "uncommon": 15, "rare": 25}
 BOSS_XP_BASE = 10
@@ -967,11 +970,14 @@ async def _send_battle_report(
                 text=text,
                 parse_mode="HTML",
             )
+            # Отчёт о бое — на две минуты, потом бот его убирает.
+            await redirect_self_delete(context, chat_id, message_id, BATTLE_REPORT_DELETE_DELAY)
             return
         except Exception:
             pass  # сообщение удалено — отправим новое ниже
     try:
-        await context.bot.send_message(chat_id=chat_id, text=text, parse_mode="HTML")
+        message = await context.bot.send_message(chat_id=chat_id, text=text, parse_mode="HTML")
+        await redirect_self_delete(context, chat_id, message.message_id, BATTLE_REPORT_DELETE_DELAY)
     except Exception as e:
         logger.error("Failed to send battle report for %s: %s", user_id, e)
 
