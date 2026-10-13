@@ -297,6 +297,33 @@ class TestAdventureCommandCleanup:
         assert entries == [(120, 600), (120, 601)]
 
 
+class TestLockedLocationBackButton:
+    async def test_low_level_screen_has_back_button(self, tmp_path, monkeypatch, fake_context):
+        """Экран «Требуется уровень N» не тупик: есть кнопка назад к локациям."""
+        data_path = tmp_path / "player_data.json"
+        with open(data_path, "w", encoding="utf-8") as f:
+            json.dump({"123": {"hp": 200, "max_hp": 200, "lvl": 1}}, f, ensure_ascii=False)
+        monkeypatch.setattr(adv, "PLAYER_DATA_PATH", str(data_path))
+
+        query = SimpleNamespace(
+            data="adv_loc_abandoned_mine",  # в прод-данных требует уровень 2
+            answer=AsyncMock(),
+            edit_message_text=AsyncMock(),
+        )
+        await adv.adventure_callback(
+            SimpleNamespace(
+                callback_query=query,
+                effective_user=SimpleNamespace(id=123),
+            ),
+            fake_context,
+        )
+
+        args, kwargs = query.edit_message_text.await_args
+        assert "Требуется уровень 2" in args[0]
+        button = kwargs["reply_markup"].inline_keyboard[0][0]
+        assert button.callback_data == "adv_back"
+
+
 class TestLeadingEmoji:
     def test_does_not_duplicate_first_letter(self):
         # было: '🌲Охуенно тёмный лес'[:2] -> '🌲О' + 'Охуенно…' -> 'ООхуенно'

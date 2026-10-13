@@ -374,6 +374,15 @@ def _locations_keyboard(locations: dict[str, Any]) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(buttons)
 
 
+def _back_to_locations_keyboard() -> InlineKeyboardMarkup:
+    """Кнопка «назад к списку локаций» для тупиковых экранов (low_level и пр.)."""
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton(
+            _get_text("adventure.button_back_to_locations"), callback_data="adv_back",
+        )
+    ]])
+
+
 def _location_details_keyboard(loc_id: str, has_active_expedition: bool = False) -> InlineKeyboardMarkup:
     """Build keyboard for location details with expedition button."""
     if has_active_expedition:
@@ -519,6 +528,7 @@ async def adventure_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             await query.edit_message_text(
                 _get_text("adventure.low_level", level=required_level),
                 parse_mode='HTML',
+                reply_markup=_back_to_locations_keyboard(),
             )
             return
 
@@ -660,6 +670,7 @@ async def adventure_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             await query.edit_message_text(
                 _get_text("adventure.low_level", level=required_level),
                 parse_mode='HTML',
+                reply_markup=_back_to_locations_keyboard(),
             )
             return
 
