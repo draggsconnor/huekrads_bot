@@ -442,7 +442,12 @@ async def huecrab_card_callback(update: Update, context: ContextTypes.DEFAULT_TY
 
 
 async def pet_name_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Если бот ждёт имя питомца от пользователя — следующий текст это имя."""
+    """Если бот ждёт имя (питомца или гнома) — следующий текст это имя.
+
+    Диспетчер двух режимов ожидания: флаг крабового имени (PENDING_RENAME_KEY
+    из pets.py) и гномьего (GNOME_PENDING_KEY из adventure.py, ленивый импорт —
+    цикл adventure↔pets запрещён поднимать наверх).
+    """
     from html import escape
 
     message = update.effective_message
@@ -453,13 +458,50 @@ async def pet_name_text_handler(update: Update, context: ContextTypes.DEFAULT_TY
         return
 
     pending = (context.user_data or {}).get(PENDING_RENAME_KEY)
+    if pending and pending == message.chat_id:
+        context.user_data.pop(PENDING_RENAME_KEY, None)
+        result = name_pet(user.id, message.text)
+
+        # Текст-ввод имени — мусор в чате: удаляем (нужны права, иначе останется).
+        try:
+            await context.bot.delete_message(
+                chat_id=message.chat_id, message_id=message.message_id,
+            )
+        except Exception:
+            pass
+
+        if result.get("event") == "named":
+            await message.reply_text(
+                get_text("pets.name_set", name=escape(result["name"])),
+                parse_mode=ParseMode.HTML,
+            )
+        elif result.get("event") == "already_named":
+            await message.reply_text(
+                get_text("pets.name_already", name=escape(result.get("name", ""))),
+                parse_mode=ParseMode.HTML,
+            )
+        elif result.get("event") == "empty_name":
+            await message.reply_text(get_text("pets.name_usage"))
+        return
+
+    await _handle_gnome_name_input(update, context)
+
+
+async def _handle_gnome_name_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Игрок нажал «Я ХОРОШО ПОДУМАЛ» — следующий текст это имя гнома."""
+    message = update.effective_message
+    user = update.effective_user
+    from handlers.adventure import GNOME_PENDING_KEY, set_gnome_name
+
+    pending = (context.user_data or {}).get(GNOME_PENDING_KEY)
     if not pending or pending != message.chat_id:
         return  # обычное сообщение мимо режима именования
 
-    context.user_data.pop(PENDING_RENAME_KEY, None)
-    result = name_pet(user.id, message.text)
+    from html import escape
 
-    # Текст-ввод имени — мусор в чате: удаляем (нужны права, иначе останется).
+    context.user_data.pop(GNOME_PENDING_KEY, None)
+    result = set_gnome_name(user.id, message.text)
+
     try:
         await context.bot.delete_message(
             chat_id=message.chat_id, message_id=message.message_id,
@@ -467,18 +509,18 @@ async def pet_name_text_handler(update: Update, context: ContextTypes.DEFAULT_TY
     except Exception:
         pass
 
-    if result.get("event") == "named":
+    if result.get("event") == "gnome_named":
         await message.reply_text(
-            get_text("pets.name_set", name=escape(result["name"])),
+            get_text("adventure.name_set", name=result["name"]),
             parse_mode=ParseMode.HTML,
         )
-    elif result.get("event") == "already_named":
+    elif result.get("event") == "gnome_already_named":
         await message.reply_text(
-            get_text("pets.name_already", name=escape(result.get("name", ""))),
+            get_text("adventure.name_already", name=result.get("name", "")),
             parse_mode=ParseMode.HTML,
         )
-    elif result.get("event") == "empty_name":
-        await message.reply_text(get_text("pets.name_usage"))
+    elif result.get("event") in ("empty_name", "empty"):
+        await message.reply_text(get_text("adventure.name_usage"))
 
 
 async def adventure_saray_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

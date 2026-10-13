@@ -101,6 +101,48 @@ def _player_key(user_id: int) -> str:
     return str(user_id)
 
 
+# Имя гнома — один раз за жизнь, до 24 символов; хранится HTML-escaped,
+# потому что подставляется во все HTML-рендеры (см. регресс 4503395).
+MAX_GNOME_NAME_LEN = 24
+GNOME_NAME_CALLBACK_PREFIX = "gnam"
+GNOME_PENDING_KEY = "gnome_rename_pending"
+
+
+def display_username(player: dict[str, Any] | None, username: str) -> str:
+    """«Имя (username)» для названного гнома, иначе просто username."""
+    player = player or {}
+    if player.get("display_named") and player.get("display_name"):
+        return _get_text("adventure.named_display", name=player["display_name"], username=username)
+    return username
+
+
+def set_gnome_name(user_id: int, raw: str) -> dict[str, Any]:
+    """Назвать гнома (CAS: ровно один раз за жизнь).
+
+    Возвращает {"event": "gnome_named", "name"} |
+    {"event": "gnome_already_named", "name"} | {"event": "empty_name"}.
+    """
+    from html import escape
+
+    with _EXPEDITION_LOCK:
+        data = load_player_data()
+        player = data.get(_player_key(user_id))
+        if not isinstance(player, dict):
+            return {"event": "empty_name"}
+        _ensure_player_defaults(player)
+        if player.get("display_named"):
+            return {"event": "gnome_already_named", "name": player.get("display_name") or ""}
+
+        name = (raw or "").strip()[:MAX_GNOME_NAME_LEN]
+        if not name:
+            return {"event": "empty_name"}
+        safe_name = escape(name)
+        player["display_name"] = safe_name
+        player["display_named"] = True
+        save_player_data(data)
+    return {"event": "gnome_named", "name": safe_name}
+
+
 def get_player(user_id: int, pool: dict | None = None) -> dict[str, Any]:
     data = load_player_data()
     key = _player_key(user_id)
@@ -438,9 +480,11 @@ def _build_location_details_text(user, loc: dict[str, Any], loc_id: str) -> str:
         boss_name = first_boss.get("display_name", first_boss.get("name", boss_name))
         boss_chance = str(int(first_boss.get("encounter_chance", 0) * 100))
 
+    username = user.username or user.first_name
+    player = get_player(user.id)
     return _get_text(
         "adventure.location_detailed_info",
-        username=user.username or user.first_name,
+        username=display_username(player, username),
         location_emoji=_leading_emoji(loc.get("display_name") or ""),
         location_name=loc.get("name", loc_id),
         location_description=loc.get("full_description", ""),
@@ -455,6 +499,70 @@ def _build_location_details_text(user, loc: dict[str, Any], loc_id: str) -> str:
 # ---------------------------------------------------------------------------
 # Main handlers
 # ---------------------------------------------------------------------------
+
+async def adventure_name_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Призыв /adventure_name: заставить гнома стать Кем-То (один раз навсегда)."""
+    user = update.effective_user
+    if not user:
+        return
+    player = get_player(user.id)
+    username = user.username or user.first_name or _get_text("common.user.default_title")
+
+    if player.get("display_named"):
+        message = await update.effective_message.reply_text(
+            _get_text("adventure.name_already", name=player.get("display_name", "")),
+            parse_mode=ParseMode.HTML,
+        )
+    else:
+        keyboard = InlineKeyboardMarkup([[
+            InlineKeyboardButton(
+                _get_text("adventure.name_accept_button"),
+                callback_data=f"{GNOME_NAME_CALLBACK_PREFIX}_{user.id}_confirm",
+            )
+        ]])
+        message = await update.effective_message.reply_text(
+            _get_text("adventure.name_intro", username=username),
+            parse_mode=ParseMode.HTML,
+            reply_markup=keyboard,
+        )
+    await schedule_self_delete(context, update.effective_message)
+    await schedule_self_delete(context, message)
+
+
+async def gnome_name_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Кнопка «Я ХОРОШО ПОДУМАЛ»: тумблер ожидания имени текстом."""
+    query = update.callback_query
+    if query is None:
+        return
+    user = update.effective_user
+    parts = (query.data or "").split("_")  # gnam_{owner}_confirm
+    if user is None or len(parts) != 3 or parts[0] != GNOME_NAME_CALLBACK_PREFIX:
+        await query.answer()
+        return
+    try:
+        owner_id = int(parts[1])
+    except ValueError:
+        await query.answer()
+        return
+    if user.id != owner_id:
+        await query.answer(_get_text("adventure.not_your_button"))
+        return
+
+    player = get_player(user.id)
+    if player.get("display_named"):
+        await query.answer(_get_text(
+            "adventure.name_already", name=player.get("display_name", ""),
+        ))
+        return
+
+    if context.user_data.get(GNOME_PENDING_KEY):
+        context.user_data.pop(GNOME_PENDING_KEY, None)
+        await query.answer(_get_text("adventure.name_cancel_toast"))
+        return
+
+    context.user_data[GNOME_PENDING_KEY] = query.message.chat_id if query.message else user.id
+    await query.answer(_get_text("adventure.name_pending_toast"))
+
 
 async def adventure_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Entry point: /adventure — show available locations."""
@@ -715,7 +823,7 @@ async def adventure_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         
         expedition_text = _get_text(
             "adventure.expedition_start",
-            username=user.username or user.first_name,
+            username=display_username(player, user.username or user.first_name),
             location_name=loc.get("name", loc_id),
             duration=duration_minutes
         )
@@ -769,6 +877,8 @@ def _ensure_player_defaults(player: dict[str, Any]) -> None:
     player.setdefault("active_expedition", None)
     player.setdefault("active_battle", None)
     player.setdefault("equipment", {})
+    player.setdefault("display_named", False)
+    player.setdefault("display_name", "")
     player.setdefault("pet", None)
 
 
@@ -821,6 +931,7 @@ def finish_expedition(
 
         loc_id = loc_id or expedition.get("location_id")
         username = username or expedition.get("username") or _get_text("common.user.default_title")
+        username = display_username(player, username)
         chat_id = expedition.get("chat_id")
         battle_log = expedition.get("battle_log") or []
 
@@ -907,7 +1018,9 @@ async def adventure_stats_command(update: Update, context: ContextTypes.DEFAULT_
     # Build stats message
     stats_lines = [
         _get_text("adventure.adventure_stats_title"),
-        f"👤 <b>{username}</b>",
+        "👤 <b>"
+        + display_username(player, username)
+        + "</b>",
         "",
         _get_text("adventure.adventure_stats_level", level=level),
         _get_text("adventure.adventure_stats_hp", current=current_hp, max=max_hp),

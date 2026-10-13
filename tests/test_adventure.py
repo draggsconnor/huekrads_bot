@@ -324,6 +324,171 @@ class TestLockedLocationBackButton:
         assert button.callback_data == "adv_back"
 
 
+class TestGnomeNaming:
+    """/adventure_name: имя гнома заводится один раз, живёт в отображении."""
+
+    def test_set_gnome_name_cas_once(self, tmp_path, monkeypatch):
+        data_path = tmp_path / "player_data.json"
+        with open(data_path, "w", encoding="utf-8") as f:
+            json.dump({"1001": {"hp": 200, "max_hp": 200, "lvl": 1}}, f, ensure_ascii=False)
+        monkeypatch.setattr(adv, "PLAYER_DATA_PATH", str(data_path))
+
+        result = adv.set_gnome_name(1001, " Когли Изобретательный ")
+        assert result["event"] == "gnome_named"
+        assert result["name"] == "Когли Изобретательный"
+
+        # Повтор — уже нельзя никак.
+        again = adv.set_gnome_name(1001, "Гном Второй")
+        assert again["event"] == "gnome_already_named"
+
+        stored = json.load(open(data_path, encoding="utf-8"))["1001"]
+        assert stored["display_name"] == "Когли Изобретательный"
+        assert stored["display_named"] is True
+
+    def test_set_gnome_name_escapes_html(self, tmp_path, monkeypatch):
+        """Имя хранится HTML-escaped — рендеры не падают (регресс 4503395)."""
+        data_path = tmp_path / "player_data.json"
+        with open(data_path, "w", encoding="utf-8") as f:
+            json.dump({"1001": {"hp": 200, "max_hp": 200, "lvl": 1}}, f, ensure_ascii=False)
+        monkeypatch.setattr(adv, "PLAYER_DATA_PATH", str(data_path))
+
+        result = adv.set_gnome_name(1001, "<имя>&")
+        assert result["event"] == "gnome_named"
+        assert result["name"] == "&lt;имя&gt;&amp;"
+
+    def test_empty_name_rejected(self, tmp_path, monkeypatch):
+        data_path = tmp_path / "player_data.json"
+        with open(data_path, "w", encoding="utf-8") as f:
+            json.dump({"1001": {"hp": 200, "max_hp": 200, "lvl": 1}}, f, ensure_ascii=False)
+        monkeypatch.setattr(adv, "PLAYER_DATA_PATH", str(data_path))
+
+        result = adv.set_gnome_name(1001, "   ")
+        assert result["event"] == "empty_name"
+        stored = json.load(open(data_path, encoding="utf-8"))["1001"]
+        assert stored.get("display_named", False) is False
+
+    def test_display_username_named_and_unnamed(self):
+        named = {"display_name": "Когли Изобретательный", "display_named": True}
+        assert adv.display_username(named, "draggsconnor") == "Когли Изобретательный (draggsconnor)"
+        assert adv.display_username({}, "draggsconnor") == "draggsconnor"
+        assert adv.display_username({"display_named": True, "display_name": ""}, "t") == "t"
+
+    async def test_stats_show_display_name(self, tmp_path, monkeypatch, fake_context):
+        data_path = tmp_path / "player_data.json"
+        with open(data_path, "w", encoding="utf-8") as f:
+            json.dump({"1001": {
+                "hp": 200, "max_hp": 200, "lvl": 1, "xp": 0,
+                "display_name": "Когли Изобретательный", "display_named": True,
+            }}, f, ensure_ascii=False)
+        monkeypatch.setattr(adv, "PLAYER_DATA_PATH", str(data_path))
+
+        reply = AsyncMock(return_value=SimpleNamespace(chat_id=-42, message_id=500))
+        await adv.adventure_stats_command(
+            SimpleNamespace(
+                effective_user=SimpleNamespace(id=1001, username="draggsconnor", first_name="D"),
+                effective_message=SimpleNamespace(chat_id=-42, message_id=501, reply_text=reply),
+            ),
+            fake_context,
+        )
+        text = reply.await_args.args[0]
+        assert "👤 <b>Когли Изобретательный (draggsconnor)</b>" in text
+
+    async def test_battle_message_uses_display_name(self, tmp_path, monkeypatch):
+        """Бой и отчёты: «Имя (username)» вместо голого юзернейма."""
+        import handlers.battle as battle
+
+        data_path = tmp_path / "player_data.json"
+        with open(data_path, "w", encoding="utf-8") as f:
+            json.dump({"1001": {
+                "hp": 200, "max_hp": 200, "lvl": 1, "xp": 0, "inventory": [],
+                "display_name": "Когли Изобретательный", "display_named": True,
+                "active_expedition": {
+                    "location_id": "test_loc",
+                    "location_name": "Тестовая локация",
+                    "start_time": (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat(),
+                    "end_time": (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat(),
+                    "duration_seconds": 900,
+                    "chat_id": 42,
+                    "username": "draggsconnor",
+                    "encounter_scheduled": True,
+                    "encounter_at": (datetime.now(timezone.utc) - timedelta(seconds=10)).isoformat(),
+                },
+            }}, f, ensure_ascii=False)
+        monkeypatch.setattr(adv, "PLAYER_DATA_PATH", str(data_path))
+
+        state = battle.try_start_battle(1001)
+        assert state is not None
+        assert state["display"] == "Когли Изобретательный (draggsconnor)"
+        text = battle._battle_message_text(state)
+        assert "Когли Изобретательный (draggsconnor) против" in text
+
+    async def test_name_flow_command_button_then_text(
+        self, tmp_path, monkeypatch, fake_context,
+    ):
+        """/adventure_name → кнопка (ставит ожидание) → текст именует гнома."""
+        data_path = tmp_path / "player_data.json"
+        with open(data_path, "w", encoding="utf-8") as f:
+            json.dump({"1001": {"hp": 200, "max_hp": 200, "lvl": 1}}, f, ensure_ascii=False)
+        monkeypatch.setattr(adv, "PLAYER_DATA_PATH", str(data_path))
+
+        # Команда: интро + кнопка «Я ХОРОШО ПОДУМАЛ».
+        reply = AsyncMock(return_value=SimpleNamespace(chat_id=-42, message_id=600))
+        await adv.adventure_name_command(
+            SimpleNamespace(
+                effective_user=SimpleNamespace(id=1001, username="draggsconnor"),
+                effective_message=SimpleNamespace(chat_id=-42, message_id=601, reply_text=reply),
+            ),
+            fake_context,
+        )
+        assert "Я ХОРОШО ПОДУМАЛ" in str(reply.await_args.kwargs["reply_markup"])
+        assert "один раз" in reply.await_args.args[0]
+
+        # Кнопка: тумблер ожидания (scoped на чат).
+        btn = reply.await_args.kwargs["reply_markup"].inline_keyboard[0][0]
+        query = SimpleNamespace(
+            data=btn.callback_data, answer=AsyncMock(),
+            message=SimpleNamespace(chat_id=-42, message_id=600),
+        )
+        await adv.gnome_name_callback(
+            SimpleNamespace(
+                callback_query=query,
+                effective_user=SimpleNamespace(id=1001),
+            ),
+            fake_context,
+        )
+        assert fake_context.user_data[adv.GNOME_PENDING_KEY] == -42
+
+        # Текст-ввод: имя гнома фиксируется (обработчик диспетчеризуется из pets).
+        import handlers.pets as pets
+        name_reply = AsyncMock(return_value=SimpleNamespace(chat_id=-42, message_id=700))
+        message = SimpleNamespace(
+            text="Когли Изобретательный", chat_id=-42, message_id=701,
+            reply_text=name_reply,
+        )
+        await pets.pet_name_text_handler(
+            SimpleNamespace(
+                effective_user=SimpleNamespace(id=1001),
+                effective_message=message,
+            ),
+            fake_context,
+        )
+        assert "Отныне гнома зовут <b>Когли Изобретательный</b>" in name_reply.await_args.args[0]
+        stored = json.load(open(data_path, encoding="utf-8"))["1001"]
+        assert stored["display_named"] is True
+
+        # Повторная команда — «имя уже дано», кнопки больше нет.
+        second = AsyncMock(return_value=SimpleNamespace(chat_id=-42, message_id=800))
+        await adv.adventure_name_command(
+            SimpleNamespace(
+                effective_user=SimpleNamespace(id=1001, username="draggsconnor"),
+                effective_message=SimpleNamespace(chat_id=-42, message_id=801, reply_text=second),
+            ),
+            fake_context,
+        )
+        assert "Имя уже дано" in second.await_args.args[0]
+        assert "reply_markup" not in second.await_args.kwargs
+
+
 class TestLeadingEmoji:
     def test_does_not_duplicate_first_letter(self):
         # было: '🌲Охуенно тёмный лес'[:2] -> '🌲О' + 'Охуенно…' -> 'ООхуенно'

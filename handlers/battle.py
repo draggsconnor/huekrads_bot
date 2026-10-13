@@ -36,6 +36,7 @@ from handlers.adventure import (
     _get_text,
     _player_key,
     _ru_plural,
+    display_username,
     get_player,
     load_global_pool,
     load_locations,
@@ -292,6 +293,7 @@ def _new_battle(expedition: dict[str, Any]) -> dict[str, Any] | None:
         "location_id": expedition.get("location_id"),
         "chat_id": expedition.get("chat_id"),
         "username": expedition.get("username"),
+        "display": None,
         "enemy": enemy,
         "enemy_hp": int(enemy.get("hp", 40)),
         "round": 0,
@@ -625,6 +627,9 @@ def try_start_battle(user_id: int) -> dict[str, Any] | None:
         if isinstance(pet, dict) and pet.get("name"):
             battle["pet"] = {"name": pet.get("name"), "perks": dict(pet.get("perks") or {})}
         battle["gear"] = build_gear_snapshot(player)
+        battle["display"] = display_username(
+            player, battle.get("username") or "",
+        )
         player["active_battle"] = battle
         save_player_data(data)
         return battle
@@ -764,6 +769,9 @@ def _battle_keyboard(battle: dict[str, Any]) -> InlineKeyboardMarkup:
 
 
 def _battle_username(battle: dict[str, Any]) -> str:
+    """Как назвать гнома: «Имя (username)», если назван, иначе username."""
+    if battle.get("display"):
+        return battle["display"]
     return battle.get("username") or _get_text("common.user.default_title")
 
 

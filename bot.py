@@ -16,7 +16,9 @@ from handlers.adventure import (
     adventure_callback,
     adventure_command,
     adventure_inventory_command,
+    adventure_name_command,
     adventure_stats_command,
+    gnome_name_callback,
     inventory_callback,
 )
 from handlers.adventure_expiration_checker import expedition_expiration_job
@@ -46,6 +48,7 @@ BOT_COMMANDS = [
     BotCommand("start", get_text("menu.commands.start")),
     BotCommand("help", get_text("menu.commands.help")),
     BotCommand("adventure", get_text("menu.commands.adventure")),
+    BotCommand("adventure_name", get_text("menu.commands.name")),
     BotCommand("adventure_stats", get_text("menu.commands.adventure_stats")),
     BotCommand("adventure_inventory", get_text("menu.commands.adventure_inventory")),
     BotCommand("adventure_huecrab", get_text("menu.commands.huecrab")),
@@ -106,6 +109,7 @@ def main() -> None:
     application.add_handler(CommandHandler("start", adventure_command))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("adventure", adventure_command))
+    application.add_handler(CommandHandler("adventure_name", adventure_name_command))
     application.add_handler(CommandHandler("adventure_stats", adventure_stats_command))
     application.add_handler(CommandHandler("adventure_inventory", adventure_inventory_command))
     application.add_handler(CommandHandler("adventure_huecrab", adventure_huecrab_command))
@@ -139,6 +143,12 @@ def main() -> None:
         CallbackQueryHandler(
             huecrab_card_callback,
             pattern=r"^hcrab_",
+        )
+    )
+    application.add_handler(
+        CallbackQueryHandler(
+            gnome_name_callback,
+            pattern=r"^gnam_",
         )
     )
     application.add_handler(
