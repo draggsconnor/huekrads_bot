@@ -608,6 +608,26 @@ def _consume_materials(player: dict[str, Any], materials: list[dict[str, Any]]) 
     player["inventory"] = remaining
 
 
+def _stock_lines(player: dict[str, Any], recipes: list[dict[str, Any]]) -> list[str]:
+    """Кузне важно видеть, ЧО у гнома есть: запасы материалов для рецептов."""
+    counts = _inventory_counts(player)
+    needed: dict[str, None] = {}
+    for recipe in recipes:
+        for mat in recipe.get("materials") or []:
+            needed[mat.get("name", "?")] = None
+    needed_names = sorted(needed)
+
+    lines = []
+    for name in needed_names:
+        have = counts.get(name, 0)
+        lines.append(_get_text(
+            "adventure.forge_stock_line", name=name, count=have,
+        ))
+    if not lines:
+        lines.append(_get_text("adventure.forge_stock_empty"))
+    return lines
+
+
 def _equipment_with_names(player: dict[str, Any]) -> dict[str, dict[str, Any]]:
     """equipment {slot: gearId} в развёрнутом виде {slot: {…, name}}."""
     catalog = _load_gear_catalog()
@@ -642,7 +662,8 @@ def _forge_text(player: dict[str, Any]) -> str:
     for recipe in load_recipes():
         entry = glossary.get(recipe.get("result")) or {}
         costs = " · ".join(
-            f"{m.get('name', '?')} ×{m.get('qty', 1)}" for m in recipe.get("materials") or []
+            f"{m.get('name', '?')} ×{m.get('qty', 1)}/{counts.get(m.get('name', ''), 0)}"
+            for m in recipe.get("materials") or []
         )
         recipe_lines.append(_get_text(
             "adventure.forge_recipe_line", name=entry.get("name", recipe.get("id", "?")), costs=costs,
@@ -660,6 +681,9 @@ def _forge_text(player: dict[str, Any]) -> str:
         "",
         _get_text("adventure.forge_craft_section"),
         *recipe_lines,
+        "",
+        _get_text("adventure.forge_stock_header"),
+        *_stock_lines(player, load_recipes()),
         "",
         _get_text("adventure.forge_hint"),
     ])
@@ -1498,10 +1522,34 @@ def eat_inventory_item(user_id: int, name_hash: str) -> dict[str, Any]:
         }
 
 
+def _equipped_summary(player: dict[str, Any]) -> str:
+    """Короткая строка «что на гноме» для инвентаря/статистики (из equipment).
+
+    Дублирования данных нет: строка собирается на лету из equipment, поэтому
+    она всегда синхронна с кузней и со снапшотом боя.
+    """
+    equipped = _equipment_with_names(player)
+    parts = []
+    weapon = equipped.get("weapon")
+    if weapon:
+        parts.append(weapon.get("name", "?"))
+    armor = [equipped[slot]["name"] for slot in ("head", "body", "dick") if slot in equipped]
+    if armor:
+        parts.extend(armor)
+    trinket = equipped.get("trinket")
+    if trinket:
+        parts.append(f"🎪 {trinket.get('name', '?')}")
+    return " · ".join(parts) or _get_text("adventure.inventory_equipped_none")
+
+
 def _render_inventory(player: dict[str, Any]) -> str:
     """Текст инвентаря (общий для команды и для правок после укуса)."""
     inventory = player.get("inventory", [])
-    lines = [_get_text("adventure.adventure_inventory_title"), ""]
+    lines = [
+        _get_text("adventure.adventure_inventory_title"),
+        _get_text("adventure.inventory_equipped_line", gear=_equipped_summary(player)),
+        "",
+    ]
 
     if inventory:
         inventory_counts: dict[str, int] = {}

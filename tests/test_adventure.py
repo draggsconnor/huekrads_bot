@@ -666,6 +666,10 @@ class TestForge:
         args, kwargs = q.edit_message_text.await_args
         assert "Кузня" in args[0]
         assert "Топорик дровосека" in args[0]
+        # Формат «нужно/есть»: у пустого инвентаря «×3/0».
+        assert "🪵 Древесина ×3/0" in args[0]
+        assert "ЗАПАС МАТЕРИАЛОВ" in args[0]
+        assert "Древесина: 0 шт." in args[0]
         # Кнопки крафта + назад
         callbacks = [b.callback_data for row in kwargs["reply_markup"].inline_keyboard for b in row]
         assert "adv_craft_wood_axe" in callbacks
@@ -727,6 +731,49 @@ class TestForge:
         q = await self._forge_render(monkeypatch, fake_context, data_path, "adv_gear_on_wood_axe")
         q.edit_message_text.assert_not_awaited()
         assert "нет в инвентаре" in q.answer.await_args.args[0]
+
+
+class TestInventoryEquippedLine:
+    """/adventure_inventory: строка «На гноме» синхронна с equipment."""
+
+    async def _render(self, tmp_path, monkeypatch, fake_context, player):
+        data_path = tmp_path / "player_data.json"
+        with open(data_path, "w", encoding="utf-8") as f:
+            json.dump({"1001": player}, f, ensure_ascii=False)
+        monkeypatch.setattr(adv, "PLAYER_DATA_PATH", str(data_path))
+        monster_pool = {
+            "items": {},
+            "gear": {
+                "wood_axe": {"name": "🪓 Топорик дровосека", "slot": "weapon"},
+                "amulet_hamster": {"name": "🧿 Оберег хомяка", "slot": "trinket"},
+            },
+        }
+        pool_path = tmp_path / "global_pool.json"
+        pool_path.write_text(json.dumps(monster_pool, ensure_ascii=False), encoding="utf-8")
+        monkeypatch.setattr(adv, "GLOBAL_POOL_PATH", str(pool_path))
+
+        reply = AsyncMock(return_value=SimpleNamespace(chat_id=-42, message_id=610))
+        await adv.adventure_inventory_command(
+            SimpleNamespace(
+                effective_user=SimpleNamespace(id=1001),
+                effective_message=SimpleNamespace(chat_id=-42, message_id=611, reply_text=reply),
+            ),
+            fake_context,
+        )
+        return reply.await_args.args[0]
+
+    async def test_shows_nihuya_when_nothing_equipped(self, tmp_path, monkeypatch, fake_context):
+        text = await self._render(tmp_path, monkeypatch, fake_context,
+                                  {"hp": 200, "max_hp": 200, "lvl": 1})
+        assert "⚙️ На гноме: нихуя" in text
+
+    async def test_shows_equipped_names(self, tmp_path, monkeypatch, fake_context):
+        text = await self._render(tmp_path, monkeypatch, fake_context, {
+            "hp": 200, "max_hp": 200, "lvl": 1,
+            "inventory": [{"name": "🪵 Древесина", "quantity": 2}],
+            "equipment": {"weapon": "wood_axe", "trinket": "amulet_hamster"},
+        })
+        assert "⚙️ На гноме: 🪓 Топорик дровосека · 🎪 🧿 Оберег хомяка" in text
 
 
 class TestLeadingEmoji:

@@ -318,6 +318,8 @@ no_active_expedition: "❌ У вас нет активной экспедици�
 
 # Inventory
 adventure_inventory_title: "🎒 <b>Инвентарь экспедиций</b>"
+inventory_equipped_line: "⚙️ На гноме: {gear}"
+inventory_equipped_none: "нихуя"
 adventure_inventory_no_items: "Пусто..."
 adventure_inventory_item: "• {name}: {count} шт."
 inventory_item_desc: "      <i>{desc}</i>"
@@ -371,6 +373,9 @@ forge_trinket_line: "🎪 Талисман: {name}"
 forge_nothing: "нихуя"
 forge_craft_section: "<b>— СКОВАТЬ (материалы из инвентаря) —</b>"
 forge_recipe_line: "{name} — {costs}"
+forge_stock_header: "<b>— ЗАПАС МАТЕРИАЛОВ (есть у тебя) —</b>"
+forge_stock_line: "• {name}: {count} шт."
+forge_stock_empty: "• Материалов нет вообще — иди фармить."
 forge_not_enough: "Не хватает: {missing}"
 forge_crafted: "⚒ Сковано: {name}"
 forge_equip_toast: "Надето: {name}"
