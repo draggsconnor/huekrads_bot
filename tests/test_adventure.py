@@ -673,8 +673,36 @@ class TestForge:
         assert not any("[" in t for t in labels)
         callbacks = [b.callback_data for row in kwargs["reply_markup"].inline_keyboard for b in row]
         for slot in ("weapon", "head", "body", "dick", "trinket"):
-            assert f"adv_recipes_{slot}" in callbacks
-        assert "adv_back" in callbacks
+            assert f"adv_recipes_1001_{slot}" in callbacks
+        assert "adv_back_o_1001" in callbacks
+
+    async def test_foreign_back_and_to_forge_are_silent(self, tmp_path, monkeypatch, fake_context):
+        """Чужой жмёт «назад»/«← кузня» на чужом экране — тихий отказ без правок."""
+        data_path = self._data(tmp_path)
+        self._setup(tmp_path, monkeypatch, data_path)
+
+        for data in ("adv_back_o_1001", "adv_forgeb_1001"):
+            q = self._query(data)
+            await adv.adventure_callback(
+                SimpleNamespace(
+                    callback_query=q,
+                    effective_user=SimpleNamespace(id=2222222),
+                ),
+                fake_context,
+            )
+            q.answer.assert_awaited()          # кнопку «погасили» без тоста
+            q.edit_message_text.assert_not_awaited()
+
+        # Владелец всё ещё свободно ходит: назад — в меню локаций.
+        q = self._query("adv_back_o_1001")
+        await adv.adventure_callback(
+            SimpleNamespace(
+                callback_query=q,
+                effective_user=SimpleNamespace(id=1001, username="tester"),
+            ),
+            fake_context,
+        )
+        assert "Доступные локации" in q.edit_message_text.await_args.args[0]
 
     async def test_forge_badge_counts_craftable(self, tmp_path, monkeypatch, fake_context):
         """На кнопке категории — [N] если на N рецептов хватает материалов."""
@@ -714,8 +742,8 @@ class TestForge:
         assert "ЗАПАС МАТЕРИАЛОВ" in args[0]
         callbacks = [b.callback_data for row in kwargs["reply_markup"].inline_keyboard for b in row]
         assert "adv_craftr_1001_weapon_wood_axe" in callbacks
-        assert "adv_forge" in callbacks                # ← кузня
-        assert "adv_back" in callbacks                 # назад к локациям
+        assert "adv_forgeb_1001" in callbacks            # ← кузня
+        assert "adv_back_o_1001" in callbacks           # назад к локациям (лично)
 
     async def test_foreign_click_gets_cold_forge(self, tmp_path, monkeypatch, fake_context):
         """Чужой жмёт кнопку кузни → тост «не твоя кузня», инвентарь цел."""

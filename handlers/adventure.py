@@ -557,6 +557,8 @@ FORGE_CRAFT_CALLBACK = "adv_craftr_"
 FORGE_ON_CALLBACK = "adv_gear_on_"
 FORGE_OFF_CALLBACK = "adv_gear_off_"
 FORGE_RECIPES_CALLBACK = "adv_recipes_"
+FORGE_BACK_CALLBACK = "adv_back_o_"     # «назад к локациям» с персональных экранов
+FORGE_TO_FORGE_CALLBACK = "adv_forgeb_"  # «← кузня» с экрана категории (тоже личное)
 FORGE_CATEGORIES = ("weapon", "head", "body", "dick", "trinket")
 
 
@@ -675,8 +677,8 @@ def _forge_text(player: dict[str, Any], username: str) -> str:
     ])
 
 
-def _forge_keyboard(player: dict[str, Any]) -> InlineKeyboardMarkup:
-    """Кнопки кузни: категории рецептов + назад к локациям.
+def _forge_keyboard(player: dict[str, Any], user_id: int) -> InlineKeyboardMarkup:
+    """Кнопки кузни: категории рецептов + назад к локациям (всё личное).
 
     На кнопке категории — пометка [N]: сколько рецептов этой категории
     прямо сейчас можно сковать из имеющихся материалов.
@@ -691,10 +693,11 @@ def _forge_keyboard(player: dict[str, Any]) -> InlineKeyboardMarkup:
         if craftable:
             label = _get_text("adventure.forge_cat_badge", label=label, count=craftable)
         rows.append([InlineKeyboardButton(
-            label, callback_data=f"{FORGE_RECIPES_CALLBACK}{slot}",
+            label, callback_data=f"{FORGE_RECIPES_CALLBACK}{user_id}_{slot}",
         )])
     rows.append([InlineKeyboardButton(
-        _get_text("adventure.button_back_to_locations"), callback_data="adv_back",
+        _get_text("adventure.button_back_to_locations"),
+        callback_data=f"{FORGE_BACK_CALLBACK}{user_id}",
     )])
     return InlineKeyboardMarkup(rows)
 
@@ -747,10 +750,12 @@ def _forge_category_keyboard(player: dict[str, Any], slot: str, user_id: int) ->
         )])
     rows.append([
         InlineKeyboardButton(
-            _get_text("adventure.forge_back_to_forge"), callback_data="adv_forge",
+            _get_text("adventure.forge_back_to_forge"),
+            callback_data=f"{FORGE_TO_FORGE_CALLBACK}{user_id}",
         ),
         InlineKeyboardButton(
-            _get_text("adventure.button_back_to_locations"), callback_data="adv_back",
+            _get_text("adventure.button_back_to_locations"),
+            callback_data=f"{FORGE_BACK_CALLBACK}{user_id}",
         ),
     ])
     return InlineKeyboardMarkup(rows)
@@ -761,7 +766,7 @@ async def _render_forge(query, user_id: int, username: str) -> None:
     player = get_player(user_id)
     await query.edit_message_text(
         _forge_text(player, username),
-        reply_markup=_forge_keyboard(player),
+        reply_markup=_forge_keyboard(player, user_id),
         parse_mode=ParseMode.HTML,
     )
 
@@ -826,7 +831,8 @@ def _equipment_keyboard(player: dict[str, Any], user_id: int) -> InlineKeyboardM
         )])
 
     rows.append([InlineKeyboardButton(
-        _get_text("adventure.button_back_to_locations"), callback_data="adv_back",
+        _get_text("adventure.button_back_to_locations"),
+        callback_data=f"{FORGE_BACK_CALLBACK}{user_id}",
     )])
     return InlineKeyboardMarkup(rows)
 
@@ -1020,7 +1026,8 @@ async def adventure_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     # Тостовые ветки кузни отвечают на клик текстом сами — общий пустой
     # ответ НЕДОПУСТИМ до них (второй answer уже не показывает текст).
-    toast_prefixes = (FORGE_CRAFT_CALLBACK, FORGE_ON_CALLBACK, FORGE_OFF_CALLBACK)
+    # adv_recipes_* тоже отвечает сам: чужому — тост «не твоя кузня».
+    toast_prefixes = (FORGE_CRAFT_CALLBACK, FORGE_ON_CALLBACK, FORGE_OFF_CALLBACK, FORGE_RECIPES_CALLBACK)
     if not data.startswith(toast_prefixes):
         await query.answer()
 
@@ -1044,8 +1051,34 @@ async def adventure_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         username = getattr(user, "username", None) or getattr(user, "first_name", None) or _get_text("common.user.default_title")
         await query.edit_message_text(
             _forge_text(player, username),
-            reply_markup=_forge_keyboard(player),
+            reply_markup=_forge_keyboard(player, user.id),
             parse_mode=ParseMode.HTML,
+        )
+        return
+
+    # «← кузня» с экрана категории: только владелец, чужой — тихий отказ.
+    if data.startswith(FORGE_TO_FORGE_CALLBACK):
+        owner_raw = data[len(FORGE_TO_FORGE_CALLBACK):]
+        if not owner_raw.isdigit() or (user.id != int(owner_raw)):
+            await query.answer()
+            return
+        player = get_player(user.id)
+        username = getattr(user, "username", None) or getattr(user, "first_name", None) or _get_text("common.user.default_title")
+        await _render_forge(query, user.id, username)
+        return
+
+    # «назад к локациям» с персональных экранов: только владелец, чужой — тихий отказ
+    # (общая кнопка adv_back с меню локаций/карточек остаётся для всех).
+    if data.startswith(FORGE_BACK_CALLBACK):
+        owner_raw = data[len(FORGE_BACK_CALLBACK):]
+        if not owner_raw.isdigit() or (user.id != int(owner_raw)):
+            await query.answer()
+            return
+        locations = load_locations()
+        await query.edit_message_text(
+            _get_text("adventure.welcome"),
+            reply_markup=_locations_keyboard(locations),
+            parse_mode='HTML',
         )
         return
 
@@ -1057,6 +1090,7 @@ async def adventure_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         if user.id != int(owner_raw):
             await query.answer(_get_text("adventure.forge_not_your"))
             return
+        await query.answer()
         player = get_player(user.id)
         await query.edit_message_text(
             _forge_category_text(player, slot),
