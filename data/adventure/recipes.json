@@ -1,0 +1,80 @@
+{
+  "_readme": "Рецепты кузни. result — id из global_pool.json → gear; materials — {name, qty}, имя совпадает со строкой инвентаря (реcурс падает под этим именем). Чешуя дракона (без эмодзи) — так она падает с Древнего дракона.",
+  "recipes": [
+    {"id": "wood_axe", "result": "wood_axe", "materials": [
+      {"name": "🪵 Древесина", "qty": 3},
+      {"name": "👑 Смола Барона", "qty": 1}
+    ]},
+    {"id": "digger_shovel", "result": "digger_shovel", "materials": [
+      {"name": "🪵 Древесина", "qty": 2},
+      {"name": "🪨 Дроблёный камень", "qty": 1}
+    ]},
+    {"id": "prospector_pick", "result": "prospector_pick", "materials": [
+      {"name": "⛏ Ржавое зубило", "qty": 1},
+      {"name": "🪨 Дроблёный камень", "qty": 2}
+    ]},
+    {"id": "steel_axe", "result": "steel_axe", "materials": [
+      {"name": "⛏ Ржавое зубило", "qty": 1},
+      {"name": "🪨 Дроблёный камень", "qty": 3},
+      {"name": "✨ Кварцевая крошка", "qty": 3}
+    ]},
+    {"id": "dragon_axe", "result": "dragon_axe", "materials": [
+      {"name": "Чешуя дракона", "qty": 2},
+      {"name": "⛏ Ржавое зубило", "qty": 1}
+    ]},
+
+    {"id": "resin_cap", "result": "resin_cap", "materials": [
+      {"name": "👑 Смола Барона", "qty": 1},
+      {"name": "🕸️ Паутина", "qty": 2},
+      {"name": "🌿 Хвоя", "qty": 1}
+    ]},
+    {"id": "resin_shirt", "result": "resin_shirt", "materials": [
+      {"name": "👑 Смола Барона", "qty": 1},
+      {"name": "🕸️ Паутина", "qty": 2},
+      {"name": "🌿 Хвоя", "qty": 1}
+    ]},
+    {"id": "resin_pants", "result": "resin_pants", "materials": [
+      {"name": "👑 Смола Барона", "qty": 1},
+      {"name": "🕸️ Паутина", "qty": 2},
+      {"name": "🌿 Хвоя", "qty": 1}
+    ]},
+
+    {"id": "stone_cap", "result": "stone_cap", "materials": [
+      {"name": "🪨 Дроблёный камень", "qty": 2},
+      {"name": "✨ Кварцевая крошка", "qty": 2},
+      {"name": "💎 Осколок кристалла", "qty": 1}
+    ]},
+    {"id": "stone_shirt", "result": "stone_shirt", "materials": [
+      {"name": "🪨 Дроблёный камень", "qty": 2},
+      {"name": "✨ Кварцевая крошка", "qty": 2},
+      {"name": "💎 Осколок кристалла", "qty": 1}
+    ]},
+    {"id": "stone_pants", "result": "stone_pants", "materials": [
+      {"name": "🪨 Дроблёный камень", "qty": 2},
+      {"name": "✨ Кварцевая крошка", "qty": 2},
+      {"name": "💎 Осколок кристалла", "qty": 1}
+    ]},
+
+    {"id": "dragon_cap", "result": "dragon_cap", "materials": [
+      {"name": "Чешуя дракона", "qty": 2},
+      {"name": "💎 Осколок кристалла", "qty": 1}
+    ]},
+    {"id": "dragon_shirt", "result": "dragon_shirt", "materials": [
+      {"name": "Чешуя дракона", "qty": 2},
+      {"name": "💎 Осколок кристалла", "qty": 1}
+    ]},
+    {"id": "dragon_pants", "result": "dragon_pants", "materials": [
+      {"name": "Чешуя дракона", "qty": 2},
+      {"name": "💎 Осколок кристалла", "qty": 1}
+    ]},
+
+    {"id": "trinket_curio", "result": "trinket_curio", "materials": [
+      {"name": "💎 Осколок кристалла", "qty": 2},
+      {"name": "✨ Кварцевая крошка", "qty": 2}
+    ]},
+    {"id": "amulet_hamster", "result": "amulet_hamster", "materials": [
+      {"name": "💰 Кошель гнома-предателя", "qty": 1},
+      {"name": "🦴 Древние кости", "qty": 1}
+    ]}
+  ]
+}

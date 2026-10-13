@@ -44,6 +44,7 @@ EXPEDITION_RESULT_DELETE_DELAY = 120
 # локации с кнопками долго не застаивается.
 ADVENTURE_DELETE_DELAY = 120
 PERSIST_DIR = os.path.join(BASE_DIR, "persist")
+RECIPES_PATH = os.path.join(ADVENTURE_DIR, "recipes.json")
 
 LOCATIONS_PATH = os.path.join(ADVENTURE_DIR, "locations.json")
 GLOBAL_POOL_PATH = os.path.join(ADVENTURE_DIR, "global_pool.json")
@@ -71,6 +72,14 @@ def _save_json(path: str, data: Any) -> None:
 
 def load_locations() -> dict[str, Any]:
     return _load_json(LOCATIONS_PATH)
+
+
+def load_recipes() -> list[dict[str, Any]]:
+    """Рецепты кузни (data/adventure/recipes.json)."""
+    try:
+        return list(_load_json(RECIPES_PATH).get("recipes") or [])
+    except FileNotFoundError:
+        return []
 
 
 def load_global_pool() -> dict[str, Any]:
@@ -484,6 +493,10 @@ def _locations_keyboard(locations: dict[str, Any]) -> InlineKeyboardMarkup:
         buttons.append(
             [InlineKeyboardButton(btn_text, callback_data=f"adv_loc_{loc_id}")]
         )
+    # Кузня живёт рядом с локациями — с ней удобно ходить заматерелым.
+    buttons.append([InlineKeyboardButton(
+        _get_text("adventure.forge_button"), callback_data="adv_forge",
+    )])
     return InlineKeyboardMarkup(buttons)
 
 
@@ -494,6 +507,173 @@ def _back_to_locations_keyboard() -> InlineKeyboardMarkup:
             _get_text("adventure.button_back_to_locations"), callback_data="adv_back",
         )
     ]])
+
+
+# ---------------------------------------------------------------------------
+# Кузня: крафт снаряжения и надевание/снятие
+# ---------------------------------------------------------------------------
+
+FORGE_CRAFT_CALLBACK = "adv_craft_"
+FORGE_ON_CALLBACK = "adv_gear_on_"
+FORGE_OFF_CALLBACK = "adv_gear_off_"
+
+
+def _load_gear_catalog() -> dict[str, Any]:
+    return (load_global_pool().get("gear") or {})
+
+
+def _entry_qty(entry: dict[str, Any]) -> int:
+    """Количество единиц в записи инвентаря (None → 1; нули честны)."""
+    qty = entry.get("quantity")
+    return 1 if qty is None else int(qty)
+
+
+def _inventory_counts(player: dict[str, Any]) -> dict[str, int]:
+    """Сколько единиц каждого имени лежит в инвентаре (ресурсы + снаряжение)."""
+    counts: dict[str, int] = {}
+    for entry in player.get("inventory") or []:
+        name = entry.get("name")
+        if name:
+            counts[name] = counts.get(name, 0) + _entry_qty(entry)
+    return counts
+
+
+def _check_materials(player: dict[str, Any], materials: list[dict[str, Any]]) -> list[tuple[str, int, int]]:
+    """Недостающие материалы: [(имя, нужно, есть)]. Пусто — всё хватает."""
+    counts = _inventory_counts(player)
+    missing = []
+    for mat in materials or []:
+        need = int(mat.get("qty", 1) or 1)
+        have = counts.get(mat.get("name", ""), 0)
+        if have < need:
+            missing.append((mat.get("name", "?"), need, have))
+    return missing
+
+
+def _consume_materials(player: dict[str, Any], materials: list[dict[str, Any]]) -> None:
+    """Списать материалы из инвентаря (после успешной проверки)."""
+    remaining = list(player.get("inventory") or [])
+    for mat in materials or []:
+        qty_left = int(mat.get("qty", 1) or 1)
+        name = mat.get("name", "")
+        for entry in remaining:
+            if qty_left <= 0:
+                break
+            if entry.get("name") != name:
+                continue
+            take = min(qty_left, _entry_qty(entry))
+            entry["quantity"] = _entry_qty(entry) - take
+            qty_left -= take
+        remaining = [e for e in remaining if _entry_qty(e) > 0]
+    player["inventory"] = remaining
+
+
+def _equipment_with_names(player: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """equipment {slot: gearId} в развёрнутом виде {slot: {…, name}}."""
+    catalog = _load_gear_catalog()
+    equipped: dict[str, dict[str, Any]] = {}
+    for slot, gear_id in (player.get("equipment") or {}).items():
+        entry = catalog.get(gear_id)
+        if isinstance(entry, dict):
+            equipped[slot] = {**entry, "_id": gear_id}
+    return equipped
+
+
+def _add_gear_to_inventory(player: dict[str, Any], gear_id: str) -> str:
+    """Положить предмет снаряжения в инвентарь (экземпляр с gear_id)."""
+    catalog = _load_gear_catalog()
+    entry = catalog.get(gear_id) or {}
+    player["inventory"] = list(player.get("inventory") or []) + [
+        {"name": entry.get("name", gear_id), "gear_id": gear_id, "quantity": 1},
+    ]
+    return entry.get("name", gear_id)
+
+
+def _forge_text(player: dict[str, Any]) -> str:
+    """Экран кузни: экипировка + рецепты с их материалами."""
+    equipped = _equipment_with_names(player)
+    weapon_name = (equipped.get("weapon") or {}).get("name")
+    armor_names = [equipped[slot]["name"] for slot in ("head", "body", "dick") if slot in equipped]
+    trinket_name = (equipped.get("trinket") or {}).get("name")
+
+    glossary = _load_gear_catalog()
+    counts = _inventory_counts(player)
+    recipe_lines = []
+    for recipe in load_recipes():
+        entry = glossary.get(recipe.get("result")) or {}
+        costs = " · ".join(
+            f"{m.get('name', '?')} ×{m.get('qty', 1)}" for m in recipe.get("materials") or []
+        )
+        recipe_lines.append(_get_text(
+            "adventure.forge_recipe_line", name=entry.get("name", recipe.get("id", "?")), costs=costs,
+        ))
+
+    return "\n".join([
+        _get_text("adventure.forge_title"),
+        "",
+        _get_text("adventure.forge_weapon_line", name=weapon_name or _get_text("adventure.forge_nothing")),
+        _get_text(
+            "adventure.forge_armor_line",
+            names=", ".join(armor_names) or _get_text("adventure.forge_nothing"),
+        ),
+        _get_text("adventure.forge_trinket_line", name=trinket_name or _get_text("adventure.forge_nothing")),
+        "",
+        _get_text("adventure.forge_craft_section"),
+        *recipe_lines,
+        "",
+        _get_text("adventure.forge_hint"),
+    ])
+
+
+def _forge_keyboard(player: dict[str, Any]) -> InlineKeyboardMarkup:
+    """Кнопки кузни: крафт (по одному рецепту на кнопку), снять/надеть, назад."""
+    rows: list[list[InlineKeyboardButton]] = []
+    for recipe in load_recipes():
+        entry = (_load_gear_catalog().get(recipe.get("result")) or {})
+        rows.append([InlineKeyboardButton(
+            entry.get("name", recipe.get("id", "?")),
+            callback_data=f"{FORGE_CRAFT_CALLBACK}{recipe.get('id')}",
+        )])
+
+    equipped = _equipment_with_names(player)
+    for slot in ("weapon", "head", "body", "dick", "trinket"):
+        piece = equipped.get(slot)
+        if piece:
+            rows.append([InlineKeyboardButton(
+                _get_text("adventure.forge_unequip_button", name=piece.get("name", "?")),
+                callback_data=f"{FORGE_OFF_CALLBACK}{slot}",
+            )])
+
+    counts: dict[str, int] = {}
+    for entry in player.get("inventory") or []:
+        gid = entry.get("gear_id")
+        if gid:
+            counts[gid] = counts.get(gid, 0) + 1
+    catalog = _load_gear_catalog()
+    for gear_id, count in counts.items():
+        entry = catalog.get(gear_id) or {}
+        rows.append([InlineKeyboardButton(
+            _get_text(
+                "adventure.forge_equip_button",
+                name=entry.get("name", gear_id), count=count,
+            ),
+            callback_data=f"{FORGE_ON_CALLBACK}{gear_id}",
+        )])
+
+    rows.append([InlineKeyboardButton(
+        _get_text("adventure.button_back_to_locations"), callback_data="adv_back",
+    )])
+    return InlineKeyboardMarkup(rows)
+
+
+async def _render_forge(query, user_id: int) -> None:
+    """Перерисовать кузню после крафта/надевания/снятия."""
+    player = get_player(user_id)
+    await query.edit_message_text(
+        _forge_text(player),
+        reply_markup=_forge_keyboard(player),
+        parse_mode=ParseMode.HTML,
+    )
 
 
 def _location_details_keyboard(loc_id: str, has_active_expedition: bool = False) -> InlineKeyboardMarkup:
@@ -650,12 +830,18 @@ async def adventure_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 async def adventure_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle all adventure inline callbacks."""
     query = update.callback_query
-    await query.answer()
 
     data = query.data or ""
     user = update.effective_user
     if not user:
+        await query.answer()
         return
+
+    # Тостовые ветки кузни отвечают на клик текстом сами — общий пустой
+    # ответ НЕДОПУСТИМ до них (второй answer уже не показывает текст).
+    toast_prefixes = (FORGE_CRAFT_CALLBACK, FORGE_ON_CALLBACK, FORGE_OFF_CALLBACK)
+    if not data.startswith(toast_prefixes):
+        await query.answer()
 
     # ------------------------------------------------------------------
     # Back to locations list
@@ -667,6 +853,80 @@ async def adventure_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             reply_markup=_locations_keyboard(locations),
             parse_mode='HTML',
         )
+        return
+
+    # ------------------------------------------------------------------
+    # Кузня
+    # ------------------------------------------------------------------
+    if data == "adv_forge":
+        player = get_player(user.id)
+        await query.edit_message_text(
+            _forge_text(player),
+            reply_markup=_forge_keyboard(player),
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    if data.startswith(FORGE_CRAFT_CALLBACK):
+        recipe_id = data[len(FORGE_CRAFT_CALLBACK):]
+        recipe = next((r for r in load_recipes() if r.get("id") == recipe_id), None)
+        if not recipe:
+            await query.answer(_get_text("adventure.forge_craft_unknown"))
+            return
+        player = get_player(user.id)
+        missing = _check_materials(player, recipe.get("materials") or [])
+        if missing:
+            fragment = ", ".join(f"{name} ×{need} (есть {have})" for name, need, have in missing[:3])
+            await query.answer(_get_text("adventure.forge_not_enough", missing=fragment)[:200])
+            return
+        _consume_materials(player, recipe.get("materials") or [])
+        crafted_name = _add_gear_to_inventory(player, recipe.get("result") or "")
+        update_player(user.id, inventory=player["inventory"])
+        await query.answer(_get_text("adventure.forge_crafted", name=crafted_name)[:200])
+        await _render_forge(query, user.id)
+        return
+
+    if data.startswith(FORGE_ON_CALLBACK):
+        gear_id = data[len(FORGE_ON_CALLBACK):]
+        catalog = _load_gear_catalog()
+        entry = catalog.get(gear_id)
+        if not entry:
+            await query.answer(_get_text("adventure.forge_craft_unknown"))
+            return
+        slot = entry.get("slot")
+        if not slot:
+            await query.answer()
+            return
+        player = get_player(user.id)
+        index = next((i for i, e in enumerate(player.get("inventory") or [])
+                      if e.get("gear_id") == gear_id), None)
+        if index is None:
+            await query.answer(_get_text("adventure.forge_missing_in_inventory")[:200])
+            return
+        inventory = list(player.get("inventory") or [])
+        del inventory[index]
+        equipment = dict(player.get("equipment") or {})
+        previous = equipment.get(slot)
+        equipment[slot] = gear_id
+        update_player(user.id, inventory=inventory, equipment=equipment)
+        await query.answer(_get_text("adventure.forge_equip_toast", name=entry.get("name", gear_id))[:200])
+        await _render_forge(query, user.id)
+        return
+
+    if data.startswith(FORGE_OFF_CALLBACK):
+        slot = data[len(FORGE_OFF_CALLBACK):]
+        player = get_player(user.id)
+        equipment = dict(player.get("equipment") or {})
+        gear_id = equipment.get(slot)
+        if not gear_id:
+            await query.answer()
+            return
+        entry = _load_gear_catalog().get(gear_id) or {}
+        _add_gear_to_inventory(player, gear_id)
+        equipment[slot] = None
+        update_player(user.id, inventory=player["inventory"], equipment=equipment)
+        await query.answer(_get_text("adventure.forge_unequip_toast", name=entry.get("name", gear_id))[:200])
+        await _render_forge(query, user.id)
         return
 
     # ------------------------------------------------------------------

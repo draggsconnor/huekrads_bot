@@ -104,7 +104,7 @@
     "wood_axe": {"name": "🪓 Топорик дровосека", "slot": "weapon", "dmg": 35, "crit_chance": 0.10, "description": "Вырублен там же, где похоронен."},
     "steel_axe": {"name": "🪓 Стальной топор", "slot": "weapon", "dmg": 40, "crit_chance": 0.20, "description": "Слушает владельца. Больше никого."},
     "dragon_axe": {"name": "🪓 Драконий топор", "slot": "weapon", "dmg": 50, "crit_chance": 0.30, "description": "Испаряет вражеские аргументы."},
-    "prospector_pick": {"name": "⛏ Кайло искателей", "slot": "weapon", "dmg": 30, "loc_bonus": {"abandoned_mine": 1.5}, "description": "В шахте превращается в национальный продукт."},
+    "prospector_pick": {"name": "⛏ Кирка искателей", "slot": "weapon", "dmg": 30, "loc_bonus": {"abandoned_mine": 1.5}, "description": "В шахте превращается в национальный продукт."},
     "digger_shovel": {"name": "🪏 Лопата удачника", "slot": "weapon", "dmg": 25, "dig_loot": 0.30, "description": "Копала бы и без боя, но бой — удобный повод."},
     "resin_cap": {"name": "🧢 Смоляная шапка", "slot": "head", "zone_guard": 5, "description": "Липкая, зато по-баронски дарит вторые шансы."},
     "stone_cap": {"name": "🪖 Каменная шапка", "slot": "head", "zone_guard": 10, "description": "Мысли держит при себе."},

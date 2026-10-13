@@ -549,6 +549,128 @@ class TestAdminGnomeName:
         assert "Формат" in reply.await_args.args[0]
 
 
+class TestForge:
+    """⚒ Кузня: крафт из материалов, надевание и снятие снаряжения."""
+
+    def _data(self, tmp_path, inventory=None, equipment=None):
+        data_path = tmp_path / "player_data.json"
+        with open(data_path, "w", encoding="utf-8") as f:
+            json.dump({"1001": {
+                "hp": 200, "max_hp": 200, "lvl": 1, "xp": 0,
+                "inventory": inventory or [],
+                "equipment": equipment or {},
+            }}, f, ensure_ascii=False)
+        return data_path
+
+    POOL = {
+        "items": {},
+        "gear": {
+            "wood_axe": {"name": "🪓 Топорик дровосека", "slot": "weapon", "dmg": 35},
+            "resin_cap": {"name": "🧢 Смоляная шапка", "slot": "head", "zone_guard": 5},
+        },
+    }
+    RECIPES = {"recipes": [
+        {"id": "wood_axe", "result": "wood_axe", "materials": [
+            {"name": "🪵 Древесина", "qty": 3},
+            {"name": "👑 Смола Барона", "qty": 1},
+        ]},
+    ]}
+
+    def _setup(self, tmp_path, monkeypatch, data_path):
+        import importlib, tempfile, os
+        pool_path = tmp_path / "global_pool.json"
+        pool_path.write_text(json.dumps(self.POOL, ensure_ascii=False), encoding="utf-8")
+        recipes_path = tmp_path / "recipes.json"
+        recipes_path.write_text(json.dumps(self.RECIPES, ensure_ascii=False), encoding="utf-8")
+        monkeypatch.setattr(adv, "GLOBAL_POOL_PATH", str(pool_path))
+        monkeypatch.setattr(adv, "RECIPES_PATH", str(recipes_path))
+        monkeypatch.setattr(adv, "PLAYER_DATA_PATH", str(data_path))
+
+    def _query(self, data):
+        return SimpleNamespace(data=data, answer=AsyncMock(), edit_message_text=AsyncMock())
+
+    async def _forge_render(self, monkeypatch, fake_context, data_path, data):
+        q = self._query(data)
+        await adv.adventure_callback(
+            SimpleNamespace(
+                callback_query=q,
+                effective_user=SimpleNamespace(id=1001),
+            ),
+            fake_context,
+        )
+        return q
+
+    async def test_forge_screen_lists_recipes_and_knarki(self, tmp_path, monkeypatch, fake_context):
+        data_path = self._data(tmp_path)
+        self._setup(tmp_path, monkeypatch, data_path)
+
+        q = await self._forge_render(monkeypatch, fake_context, data_path, "adv_forge")
+        args, kwargs = q.edit_message_text.await_args
+        assert "Кузня" in args[0]
+        assert "Топорик дровосека" in args[0]
+        # Кнопки крафта + назад
+        callbacks = [b.callback_data for row in kwargs["reply_markup"].inline_keyboard for b in row]
+        assert "adv_craft_wood_axe" in callbacks
+        assert "adv_back" in callbacks
+
+    async def test_locations_list_has_forge_button(self, tmp_path, monkeypatch):
+        keyboard = adv._locations_keyboard({"dark_forest": {"name": "Лес"}})
+        labels = [b.text for row in keyboard.inline_keyboard for b in row]
+        assert "⚒ КУЗНЯ" in labels
+
+    async def test_craft_success_consumes_and_stores_gear(self, tmp_path, monkeypatch, fake_context):
+        inventory = [{"name": "🪵 Древесина", "quantity": 3},
+                     {"name": "🪵 Древесина", "quantity": 1},  # лиш detail лишняя единица не помешает
+                     {"name": "👑 Смола Барона", "quantity": 1}]
+        data_path = self._data(tmp_path, inventory=inventory)
+        self._setup(tmp_path, monkeypatch, data_path)
+        fake_context.bot.edit_message_text = AsyncMock()
+
+        q = await self._forge_render(monkeypatch, fake_context, data_path, "adv_craft_wood_axe")
+
+        q.answer.assert_awaited_once()
+        assert "Сковано" in q.answer.await_args.args[0]
+        stored = json.load(open(data_path, encoding="utf-8"))["1001"]
+        wood_left = [i for i in stored["inventory"] if i["name"] == "🪵 Древесина"]
+        assert wood_left == [{"name": "🪵 Древесина", "quantity": 1, "gear_id": None}] or wood_left[0]["quantity"] == 1
+        gear = [i for i in stored["inventory"] if i.get("gear_id") == "wood_axe"]
+        assert gear and gear[0]["name"] == "🪓 Топорик дровосека"
+
+    async def test_craft_missing_materials_rejected(self, tmp_path, monkeypatch, fake_context):
+        data_path = self._data(tmp_path, inventory=[{"name": "🪵 Древесина", "quantity": 1}])
+        self._setup(tmp_path, monkeypatch, data_path)
+
+        q = await self._forge_render(monkeypatch, fake_context, data_path, "adv_craft_wood_axe")
+        q.edit_message_text.assert_not_awaited()          # экран не отрисовался
+        answer_text = q.answer.await_args.args[0]
+        assert "Не хватает" in answer_text
+        assert "Смола" in answer_text
+
+    async def test_equip_then_unequip_roundtrip(self, tmp_path, monkeypatch, fake_context):
+        inventory = [{"name": "🪓 Топорик дровосека", "gear_id": "wood_axe", "quantity": 1}]
+        data_path = self._data(tmp_path, inventory=inventory)
+        self._setup(tmp_path, monkeypatch, data_path)
+
+        # Надели.
+        await self._forge_render(monkeypatch, fake_context, data_path, "adv_gear_on_wood_axe")
+        stored = json.load(open(data_path, encoding="utf-8"))["1001"]
+        assert stored["equipment"]["weapon"] == "wood_axe"
+        assert all(i.get("gear_id") != "wood_axe" for i in stored["inventory"])
+
+        # Сняли — вернулся в инвентарь.
+        await self._forge_render(monkeypatch, fake_context, data_path, "adv_gear_off_weapon")
+        stored = json.load(open(data_path, encoding="utf-8"))["1001"]
+        assert stored["equipment"]["weapon"] in (None,)
+        assert any(i.get("gear_id") == "wood_axe" for i in stored["inventory"])
+
+    async def test_equip_missing_instance_rejected(self, tmp_path, monkeypatch, fake_context):
+        data_path = self._data(tmp_path)
+        self._setup(tmp_path, monkeypatch, data_path)
+        q = await self._forge_render(monkeypatch, fake_context, data_path, "adv_gear_on_wood_axe")
+        q.edit_message_text.assert_not_awaited()
+        assert "нет в инвентаре" in q.answer.await_args.args[0]
+
+
 class TestLeadingEmoji:
     def test_does_not_duplicate_first_letter(self):
         # было: '🌲Охуенно тёмный лес'[:2] -> '🌲О' + 'Охуенно…' -> 'ООхуенно'
